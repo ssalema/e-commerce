@@ -77,7 +77,7 @@ export default function OrderSuccess() {
             <span className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-full bg-white/20 ring-4 ring-white/25">
               <Icon name="check" size={34} />
             </span>
-            <h1 className="text-2xl font-extrabold">{t('success.title')}</h1>
+            <h1 className="display-title text-white">{t('success.title')}</h1>
             <p className="mt-1.5 text-sm text-emerald-50">{t('success.subtitle')}</p>
           </div>
 

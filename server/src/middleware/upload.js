@@ -51,14 +51,34 @@ const RESUME_MIMES = [
 ];
 const RESUME_MAX_BYTES = 5 * 1024 * 1024;
 
+/**
+ * Generic types browsers send for a .doc they cannot identify. Accepted only
+ * alongside a matching extension, never on their own.
+ */
+const RESUME_GENERIC_MIMES = ['application/octet-stream', 'application/x-msdownload', ''];
+
 const resumeUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: RESUME_MAX_BYTES, files: 1 },
   fileFilter(_req, file, cb) {
-    // Some browsers send an empty/generic mimetype for .doc, so the extension is
-    // checked as well rather than rejecting a legitimate upload outright.
-    const extensionOk = /\.(pdf|doc|docx)$/i.test(file.originalname || '');
-    if (!RESUME_MIMES.includes(file.mimetype) && !extensionOk) {
+    /**
+     * Both halves have to agree, and that is the whole point.
+     *
+     * Accepting *either* signal meant "payload.html declared as application/pdf"
+     * passed on the mimetype while keeping its .html extension — and the
+     * extension is what Cloudinary stores and later serves the file as, so the
+     * resume came back to staff as text/html. Requiring the pair means the name
+     * a browser will act on and the type the uploader claimed can never disagree.
+     *
+     * The generic types some browsers send for .doc are still tolerated, but only
+     * because the extension has to back them up.
+     */
+    const extension = (String(file.originalname || '').match(/\.([a-z0-9]+)$/i)?.[1] || '').toLowerCase();
+    const extensionOk = ['pdf', 'doc', 'docx'].includes(extension);
+    const mimeOk =
+      RESUME_MIMES.includes(file.mimetype) || RESUME_GENERIC_MIMES.includes(file.mimetype || '');
+
+    if (!extensionOk || !mimeOk) {
       return cb(ApiError.badRequest('Only PDF, DOC and DOCX resumes are allowed'));
     }
     cb(null, true);

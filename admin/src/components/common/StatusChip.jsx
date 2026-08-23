@@ -33,6 +33,21 @@ const PALETTES = {
   position: { open: 'success', closed: 'default' },
   experience: { offered: 'success', hidden: 'default' },
   /**
+   * The `isActive` boolean every catalogue record carries — a banner, a brand, a
+   * category, a coupon, a picklist reason — plus the one state a coupon reaches
+   * without anybody touching it.
+   *
+   * 'inactive' is 'default' for the same reason 'closed' and 'hidden' are above:
+   * taking something off the storefront is housekeeping, not a fault. Only
+   * 'expired' carries a colour, because that one happened on its own and may be
+   * news to the reader.
+   *
+   * Tables draw this in every row, so the chip is always present; the card grids
+   * badge only the off state, since a wall of green "Active" chips says nothing
+   * the reader had not already assumed.
+   */
+  availability: { active: 'success', inactive: 'default', expired: 'error' },
+  /**
    * A reactivation request: waiting on a person, then the decision either way.
    * Amber for pending, matching everything else in the panel that is queued
    * behind someone.

@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import Grid from '@mui/material/Grid2';
@@ -11,7 +11,10 @@ import Divider from '@mui/material/Divider';
 import Avatar from '@mui/material/Avatar';
 import Tooltip from '@mui/material/Tooltip';
 import Chip from '@mui/material/Chip';
-import LinearProgress from '@mui/material/LinearProgress';
+import Skeleton from '@mui/material/Skeleton';
+import Tabs from '@mui/material/Tabs';
+import Tab from '@mui/material/Tab';
+import { keyframes } from '@mui/material/styles';
 
 import EditIcon from '@mui/icons-material/EditOutlined';
 import ArrowBackIcon from '@mui/icons-material/ArrowBackIosNew';
@@ -60,7 +63,7 @@ const storeLinkProps = (slug) =>
  * which person. `actor` is recorded on the entry; `cancelledBy` on the order is
  * the fallback for rows written before that field existed.
  */
-const actorLabel = (entry, order) => {
+const actorLabel = (entry, order = {}) => {
   const side = entry.actor || (CLOSING_STATUSES.includes(entry.status) ? order.cancelledBy : null);
   const name = entry.changedBy?.name;
 
@@ -68,6 +71,21 @@ const actorLabel = (entry, order) => {
   if (side === 'system') return 'the system';
   return name ? `${name} (admin)` : 'our team';
 };
+
+/** A step's note, credited to whoever left it: "by our team · picked up". */
+const noteWithActor = (entry) =>
+  entry?.note ? `by ${actorLabel(entry)} · ${entry.note}` : null;
+
+/**
+ * The storefront's `animate-pulse`, by hand — the breathing bead that marks the
+ * step a journey is sitting on right now. Tailwind's own keyframes are not in
+ * this app, and the panel should not be the screen where "where is it now" reads
+ * as static when the customer's copy of the same ladder is breathing.
+ */
+const PULSE = keyframes`
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+`;
 
 /**
  * The storefront's palette, by hex.
@@ -120,6 +138,8 @@ function timelineRows(order) {
       key,
       label: ORDER_STEP_LABELS[key],
       done: index <= reached,
+      // Nothing is still in progress once an order has stopped.
+      active: !closed && index === reached,
       at: entry?.changedAt || (index === 0 ? order.createdAt : null),
       note: entry?.note,
     };
@@ -141,16 +161,19 @@ function timelineRows(order) {
 }
 
 /**
- * The order's trail, drawn as the same vertical timeline the storefront's order
- * page shows the shopper — same rows, same beads, same rail, same red panel — so
- * an agent on the phone and the customer describing their screen are looking at
- * one picture. The wording inside the red panel is the one deliberate
- * difference: the shop needs to read *who* cancelled, where the shopper reads
- * "by you".
+ * The one ladder both of an order's journeys are drawn as — a port of
+ * client/src/components/orders/Timeline.jsx, deliberately identical.
+ *
+ * The fulfilment trail and the return over the same parcel used to be two
+ * different pictures: a vertical trail for one, a four-across tracker for the
+ * other. They answer the same question ("where has this got to"), so they now
+ * get the same answer shape, and an agent on the phone and the customer
+ * describing their screen are looking at one thing on both journeys.
+ *
+ * A row is:
+ *   { key, label, done, active, closing, at, note, panel: { title, text } }
  */
-function StatusTimeline({ order }) {
-  const rows = timelineRows(order);
-
+function Timeline({ rows }) {
   return (
     <Box component="ol" sx={{ listStyle: 'none', m: 0, p: 0, position: 'relative' }}>
       {rows.map((row, index) => {
@@ -195,6 +218,7 @@ function StatusTimeline({ order }) {
                 // Rings the bead in the card's own background so the rail appears
                 // to run behind it rather than into it.
                 boxShadow: (theme) => `0 0 0 4px ${theme.palette.background.paper}`,
+                ...(row.active && { animation: `${PULSE} 2s ease-in-out infinite` }),
               }}
             >
               {closing ? (
@@ -225,14 +249,23 @@ function StatusTimeline({ order }) {
                 </Typography>
               )}
 
-              {closing ? (
+              {row.panel ? (
                 <Box sx={{ mt: 1, p: 1.5, borderRadius: 2, bgcolor: TL.closedTint }}>
-                  <Typography variant="caption" display="block" fontWeight={700} sx={{ color: TL.closedLabel }}>
-                    {titleCase(row.key)} by {actorLabel(row.entry || {}, order)}
+                  <Typography
+                    variant="caption"
+                    display="block"
+                    fontWeight={700}
+                    sx={{ color: TL.closedLabel }}
+                  >
+                    {row.panel.title}
                   </Typography>
-                  {(order.cancellationReason || row.entry?.note) && (
-                    <Typography variant="caption" display="block" sx={{ mt: 0.25, color: TL.closedMeta }}>
-                      Reason: {order.cancellationReason || row.entry?.note}
+                  {row.panel.text && (
+                    <Typography
+                      variant="caption"
+                      display="block"
+                      sx={{ mt: 0.25, color: TL.closedMeta }}
+                    >
+                      {row.panel.text}
                     </Typography>
                   )}
                 </Box>
@@ -252,93 +285,192 @@ function StatusTimeline({ order }) {
 }
 
 /**
- * The return's own progress, as the panel's version of the horizontal tracker the
- * customer is watching. Same four steps, same names — a support call about "it
- * says out for pickup" has to land on the same words on both screens.
- *
- * A declined return keeps whatever it had reached: the pickup really did happen
- * if it happened, and erasing it would make the refusal unreadable.
+ * The order's trail, drawn as the same vertical timeline the storefront's order
+ * page shows the shopper — same rows, same beads, same rail, same red panel — so
+ * an agent on the phone and the customer describing their screen are looking at
+ * one picture. The wording inside the red panel is the one deliberate
+ * difference: the shop needs to read *who* cancelled, where the shopper reads
+ * "by you".
  */
-function ReturnTimeline({ request }) {
+function StatusTimeline({ order }) {
+  const rows = timelineRows(order).map((row) =>
+    row.closing
+      ? {
+          ...row,
+          panel: {
+            title: `${titleCase(row.key)} by ${actorLabel(row.entry || {}, order)}`,
+            text: order.cancellationReason || row.entry?.note
+              ? `Reason: ${order.cancellationReason || row.entry?.note}`
+              : null,
+          },
+        }
+      : row
+  );
+
+  return <Timeline rows={rows} />;
+}
+
+/**
+ * The rows the return's timeline draws — the twin of `timelineRows` above, over
+ * the return's own ladder, and a port of `returnRows` in
+ * client/src/components/orders/ReturnTracker.jsx.
+ *
+ * A declined return is read the way a cancelled order is: the steps it really
+ * reached stay complete, the refusal is appended as the closing row in the words
+ * staff wrote, and the steps it never got to are not drawn at all. A live return
+ * keeps the full ladder ahead of it, greyed, so staff see the same "what's left"
+ * the customer does.
+ */
+function returnRows(request) {
   const history = request.history || [];
   const rejected = request.status === 'rejected';
-  const reachedFrom = history.reduce(
-    (max, row) => Math.max(max, RETURN_STATUS_STEPS.indexOf(row.status)),
-    -1
-  );
-  const reached = Math.max(reachedFrom, RETURN_STATUS_STEPS.indexOf(request.status), 0);
+  const rankOf = (status) => RETURN_STATUS_STEPS.indexOf(status);
+  const entryFor = (status) => history.find((row) => row.status === status);
+
+  const reachedFromHistory = history.reduce((max, row) => Math.max(max, rankOf(row.status)), -1);
+  // "Return Requested" is true of every return, whether or not a `requested` row
+  // was ever written — raising it is what created the request.
+  const reached = rejected
+    ? Math.max(reachedFromHistory, 0)
+    : Math.max(reachedFromHistory, rankOf(request.status), 0);
 
   const stampFor = (key) =>
     ({
       requested: request.requestedAt,
-      out_for_pickup: history.find((row) => row.status === 'out_for_pickup')?.changedAt,
+      out_for_pickup: request.pickedUpAt || entryFor('out_for_pickup')?.changedAt,
       refund_started: request.refundStartedAt,
       refund_success: request.refundCompletedAt,
     })[key];
 
-  return (
-    <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', columnGap: 0.5 }}>
-      {RETURN_STATUS_STEPS.map((key, index) => {
-        const done = index <= reached;
-        const at = stampFor(key);
-        const last = index === RETURN_STATUS_STEPS.length - 1;
+  const steps = RETURN_STATUS_STEPS.slice(0, rejected ? reached + 1 : undefined).map(
+    (key, index) => ({
+      key,
+      label: RETURN_STATUS_LABELS[key],
+      done: index <= reached,
+      // Nothing is still in flight once the request has been refused, and the
+      // last step is where the journey ends rather than something in progress.
+      active: !rejected && index === reached && reached < RETURN_STATUS_STEPS.length - 1,
+      at: stampFor(key) || (index === 0 ? request.requestedAt : entryFor(key)?.changedAt),
+      // The row that raised the return is stamped with the reason as its note,
+      // which the details underneath already state in full — so it is dropped
+      // here rather than said twice a few lines apart. Every other note is a
+      // staff remark, and the panel names who left it — the same "who did this"
+      // the order's own closing row carries, and the thing an agent picking up
+      // the call asks first.
+      note: key === 'requested' ? null : noteWithActor(entryFor(key)),
+    })
+  );
 
-        return (
-          <Box key={key} sx={{ position: 'relative', minWidth: 0 }}>
-            {/* The rail runs out of this dot toward the next, and takes the colour
-                of the step it arrives at — so the green stops where progress does. */}
-            {!last && (
-              <Box
-                sx={{
-                  position: 'absolute',
-                  left: '50%',
-                  top: 13,
-                  height: 2,
-                  width: '100%',
-                  bgcolor: index + 1 <= reached ? TL.done : TL.rail,
-                }}
-              />
-            )}
-            <Box
-              sx={{
-                position: 'relative',
-                zIndex: 1,
-                width: 28,
-                height: 28,
-                borderRadius: '50%',
-                display: 'grid',
-                placeItems: 'center',
-                color: done ? '#fff' : TL.todoDot,
-                bgcolor: done ? TL.done : TL.rail,
-              }}
-            >
-              {done ? (
-                <CheckIcon sx={{ fontSize: 15 }} />
-              ) : (
-                <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'currentColor' }} />
-              )}
-            </Box>
-            <Typography
-              variant="caption"
-              display="block"
-              fontWeight={700}
-              sx={{ mt: 1, pr: 1, lineHeight: 1.25, color: done ? TL.label : TL.labelTodo }}
-            >
-              {RETURN_STATUS_LABELS[key]}
-            </Typography>
-            {at && done && (
-              <Typography variant="caption" display="block" sx={{ pr: 1, color: TL.meta }}>
-                {formatDateTime(at)}
-              </Typography>
-            )}
-            {last && rejected && (
-              <Typography variant="caption" display="block" sx={{ pr: 1, color: TL.closedMeta }}>
-                Declined
-              </Typography>
-            )}
-          </Box>
-        );
-      })}
+  if (!rejected) return steps;
+
+  const entry = entryFor('rejected');
+
+  return [
+    ...steps,
+    {
+      key: 'rejected',
+      label: RETURN_STATUS_LABELS.rejected,
+      done: true,
+      closing: true,
+      at: request.rejectedAt || entry?.changedAt,
+      panel: {
+        title: `Declined by ${actorLabel(entry || {}, {})}`,
+        text: request.rejectionReason ? `Reason: ${request.rejectionReason}` : null,
+      },
+    },
+  ];
+}
+
+/**
+ * The return's own progress, on the same ladder the order's history uses and —
+ * like the storefront — behind a tab in the same card, so a support call about
+ * "it says out for pickup" lands on the same words in the same place on both
+ * screens.
+ */
+function ReturnTimeline({ request }) {
+  return <Timeline rows={returnRows(request)} />;
+}
+
+/**
+ * The page's own outline while the order is being read.
+ *
+ * The order number is what a support agent is looking at when this page opens, so
+ * the header keeps its breadcrumb back to the list and greys in the title rather
+ * than replacing the whole page with a progress bar — the layout that arrives is
+ * already on screen, and nothing jumps when the data lands.
+ */
+function OrderDetailSkeleton() {
+  return (
+    <Box>
+      <PageHeader
+        title={<Skeleton variant="text" width={200} />}
+        subtitle={<Skeleton variant="text" width={260} />}
+        breadcrumbs={[{ label: 'Orders', to: '/orders' }, { label: 'Order' }]}
+        action={<Skeleton variant="rounded" width={210} height={36} />}
+      />
+
+      <Stack direction="row" spacing={1.5} sx={{ mb: 3 }}>
+        <Skeleton variant="rounded" width={96} height={24} />
+        <Skeleton variant="rounded" width={96} height={24} />
+        <Skeleton variant="text" width={130} />
+      </Stack>
+
+      <Grid container spacing={2.5}>
+        <Grid size={{ xs: 12, lg: 8 }}>
+          <Card sx={{ mb: 2.5 }}>
+            <CardContent>
+              <Skeleton variant="text" width={90} height={20} />
+            </CardContent>
+            <Divider />
+            {Array.from({ length: 3 }).map((_, index) => (
+              <Stack
+                key={index}
+                direction="row"
+                spacing={2}
+                alignItems="center"
+                sx={{ px: 2.5, py: 2, borderBottom: 1, borderColor: 'divider', '&:last-of-type': { borderBottom: 0 } }}
+              >
+                <Skeleton variant="rounded" width={56} height={56} sx={{ flexShrink: 0 }} />
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Skeleton variant="text" width="60%" />
+                  <Skeleton variant="text" width="30%" height={16} />
+                </Box>
+                <Skeleton variant="text" width={70} />
+              </Stack>
+            ))}
+          </Card>
+
+          {/* The tracking card — a heading over the journey's steps. */}
+          <Card>
+            <CardContent>
+              <Skeleton variant="text" width={120} height={20} sx={{ mb: 2 }} />
+              <Stack spacing={1.5}>
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <Stack key={index} direction="row" spacing={2} alignItems="center">
+                    <Skeleton variant="circular" width={22} height={22} sx={{ flexShrink: 0 }} />
+                    <Skeleton variant="text" width={`${55 - index * 8}%`} />
+                  </Stack>
+                ))}
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid size={{ xs: 12, lg: 4 }}>
+          <Stack spacing={2.5}>
+            {[3, 5, 4].map((lines, cardIndex) => (
+              <Card key={cardIndex}>
+                <CardContent>
+                  <Skeleton variant="text" width={110} height={18} sx={{ mb: 2 }} />
+                  {Array.from({ length: lines }).map((_, line) => (
+                    <Skeleton key={line} variant="text" width={`${85 - line * 10}%`} />
+                  ))}
+                </CardContent>
+              </Card>
+            ))}
+          </Stack>
+        </Grid>
+      </Grid>
     </Box>
   );
 }
@@ -365,6 +497,16 @@ export default function OrderDetail() {
   const [updating, setUpdating] = useState(false);
   const [updatingPayment, setUpdatingPayment] = useState(false);
   const [updatingReturn, setUpdatingReturn] = useState(false);
+  /**
+   * Which journey the tracking card is showing. Only consulted when the order
+   * has a return, and it opens on the return: that is the half still moving,
+   * and it is what an agent picking up the call needs first.
+   */
+  const [journey, setJourney] = useState('return');
+  // The choice belongs to the order on screen, not to the page: this component
+  // is reused from one order to the next, and a tab left on the history would
+  // otherwise hide the next order's live return.
+  useEffect(() => setJourney('return'), [id]);
 
   const { data, loading, error, refetch } = useFetch(
     useCallback(() => orderApi.detail(id), [id]),
@@ -380,7 +522,7 @@ export default function OrderDetail() {
 
   const order = data?.data?.order;
 
-  if (loading) return <LinearProgress sx={{ mb: 2 }} />;
+  if (loading) return <OrderDetailSkeleton />;
   if (error || !order) {
     return (
       <Card>
@@ -414,7 +556,14 @@ export default function OrderDetail() {
   // The return, if this order has one. `canMoveReturn` is the panel's mirror of
   // RETURN_FLOW, so the button is only offered where the API would accept a move.
   const returnRequest = order.returnRequest?.status ? order.returnRequest : null;
-  const canMoveReturn = Boolean(RETURN_STATUS_FLOW[returnRequest?.status]?.length);
+  const returnMoves = RETURN_STATUS_FLOW[returnRequest?.status] || [];
+  const canMoveReturn = returnMoves.length > 0;
+  // What the button is actually for, named before it is pressed — "Move to Out
+  // for Pickup or Return Declined" is a far better prompt than "Update return".
+  const nextReturnStepHint = `Move to ${returnMoves.map((step) => RETURN_STATUS_LABELS[step]).join(' or ')}`;
+  const closedReturnHint = returnRequest
+    ? `This return is ${RETURN_STATUS_LABELS[returnRequest.status].toLowerCase()} and can no longer be moved`
+    : '';
 
   return (
     <Box>
@@ -537,74 +686,123 @@ export default function OrderDetail() {
             ))}
           </Card>
 
-          {/* The return is a second journey over the same parcel, so it gets its
-              own card above the order's history — and it goes first, because while
-              a return is running it is the only part still moving. */}
-          {returnRequest && (
-            <Box sx={{ mb: 2.5 }}>
-            <InfoCard
-              title="Return request"
-              action={
-                canMoveReturn && (
-                  <Button size="small" startIcon={<ReturnIcon />} onClick={() => setUpdatingReturn(true)}>
-                    Update return
-                  </Button>
-                )
-              }
+          {/* Both journeys over the same parcel live in this one card, a tab
+              apiece — the same single place the shopper reads them in. A return
+              is a second trip rather than a continuation, so it keeps its own
+              tracker; with no return there is nothing to switch between and the
+              card is just the order's status timeline under a plain heading. */}
+          <Card>
+            {/* The header sits outside the content's padding so its rule runs the
+                full width of the card — the storefront's tab strip reaches its
+                card's edges the same way. The tabs carry their own padding and
+                height, so the row adds none on their side: any left padding here
+                would push the first tab's underline in off the card's edge. */}
+            <Stack
+              direction="row"
+              justifyContent="space-between"
+              alignItems="center"
+              spacing={1.5}
+              sx={{
+                pl: returnRequest ? 0 : 2,
+                pr: 2,
+                pt: returnRequest ? 0 : 1.5,
+                pb: returnRequest ? 0 : 1.5,
+                borderBottom: 1,
+                borderColor: 'divider',
+              }}
             >
-              <ReturnTimeline request={returnRequest} />
+              {returnRequest ? (
+                <Tabs
+                  value={journey}
+                  onChange={(_, value) => setJourney(value)}
+                  sx={{ minHeight: 44, '& .MuiTab-root': { minHeight: 44, fontWeight: 700 } }}
+                >
+                  <Tab value="order" label="Order Status" />
+                  <Tab value="return" label="Return Status" />
+                </Tabs>
+              ) : (
+                <Typography variant="subtitle2" color="text.secondary" textTransform="uppercase" letterSpacing={0.4}>
+                  Order Status
+                </Typography>
+              )}
+              {/* The return's one action, offered only while its own tab is
+                  open — and drawn as the card's primary button rather than the
+                  plain text link it was, because moving a return along is the
+                  only thing there is to *do* on this tab and it was reading as
+                  a caption. On a return that has ended it stays put, disabled,
+                  and says why: a button that vanishes reads as a broken
+                  feature, which is exactly how the storefront handles the same
+                  moment. */}
+              {returnRequest && journey === 'return' && (
+                <Tooltip title={canMoveReturn ? nextReturnStepHint : closedReturnHint}>
+                  {/* A disabled button fires no events, so the tooltip needs a
+                      live element of its own to hang off. */}
+                  <Box component="span" sx={{ flexShrink: 0 }}>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      disableElevation
+                      disabled={!canMoveReturn}
+                      startIcon={<ReturnIcon sx={{ fontSize: 16 }} />}
+                      onClick={() => setUpdatingReturn(true)}
+                      sx={{ fontWeight: 700, whiteSpace: 'nowrap' }}
+                    >
+                      Update return
+                    </Button>
+                  </Box>
+                </Tooltip>
+              )}
+            </Stack>
 
-              <Divider sx={{ my: 2.5 }} />
+            <CardContent>
+              {returnRequest && journey === 'return' ? (
+                <>
+                <ReturnTimeline request={returnRequest} />
 
-              <Stack spacing={1}>
-                <Stack direction="row" justifyContent="space-between" spacing={2}>
-                  <Typography variant="body2" color="text.secondary">
-                    Reason
-                  </Typography>
-                  <Typography variant="body2" fontWeight={600} textAlign="right">
-                    {returnRequest.reason}
-                  </Typography>
-                </Stack>
-                {returnRequest.refundAmount > 0 && (
+                <Divider sx={{ my: 2.5 }} />
+
+                <Stack spacing={1}>
                   <Stack direction="row" justifyContent="space-between" spacing={2}>
                     <Typography variant="body2" color="text.secondary">
-                      Refund amount
-                    </Typography>
-                    <Typography variant="body2" fontWeight={600}>
-                      {formatPrice(returnRequest.refundAmount, true)}
-                    </Typography>
-                  </Stack>
-                )}
-                {returnRequest.pickupTrackingNumber && (
-                  <Stack direction="row" justifyContent="space-between" spacing={2}>
-                    <Typography variant="body2" color="text.secondary">
-                      Pickup
+                      Reason
                     </Typography>
                     <Typography variant="body2" fontWeight={600} textAlign="right">
-                      {returnRequest.pickupTrackingNumber}
-                      {returnRequest.pickupPartner && ` · ${returnRequest.pickupPartner}`}
+                      {returnRequest.reason}
                     </Typography>
                   </Stack>
-                )}
-              </Stack>
+                  {returnRequest.refundAmount > 0 && (
+                    <Stack direction="row" justifyContent="space-between" spacing={2}>
+                      <Typography variant="body2" color="text.secondary">
+                        Refund amount
+                      </Typography>
+                      <Typography variant="body2" fontWeight={600}>
+                        {formatPrice(returnRequest.refundAmount, true)}
+                      </Typography>
+                    </Stack>
+                  )}
+                  {returnRequest.pickupTrackingNumber && (
+                    <Stack direction="row" justifyContent="space-between" spacing={2}>
+                      <Typography variant="body2" color="text.secondary">
+                        Pickup
+                      </Typography>
+                      <Typography variant="body2" fontWeight={600} textAlign="right">
+                        {returnRequest.pickupTrackingNumber}
+                        {returnRequest.pickupPartner && ` · ${returnRequest.pickupPartner}`}
+                      </Typography>
+                    </Stack>
+                  )}
+                </Stack>
 
-              {returnRequest.status === 'rejected' && (
-                <Box sx={{ mt: 2, p: 1.5, borderRadius: 2, bgcolor: TL.closedTint }}>
-                  <Typography variant="caption" fontWeight={700} display="block" sx={{ color: TL.closedLabel }}>
-                    Return declined
-                  </Typography>
-                  <Typography variant="caption" display="block" sx={{ mt: 0.25, color: TL.closedMeta }}>
-                    {returnRequest.rejectionReason}
-                  </Typography>
-                </Box>
+                {/* A declined return has already said so — who declined it and
+                    why — in the closing row of the ladder above, the same place
+                    a cancelled order says it. Repeating it under the details
+                    would be the same sentence twice. */}
+                </>
+              ) : (
+                <StatusTimeline order={order} />
               )}
-            </InfoCard>
-            </Box>
-          )}
-
-          <InfoCard title="Status history">
-            <StatusTimeline order={order} />
-          </InfoCard>
+            </CardContent>
+          </Card>
         </Grid>
 
         <Grid size={{ xs: 12, lg: 4 }}>

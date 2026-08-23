@@ -12,7 +12,7 @@ export default function NotFound() {
 
       <div className="container-page flex min-h-[60vh] flex-col items-center justify-center text-center">
         <p className="mb-2 text-7xl font-black text-brand-600">404</p>
-        <h1 className="mb-2 text-2xl font-bold text-ink-900">{t('errors.notFoundHeading')}</h1>
+        <h1 className="mb-2 display-title">{t('errors.notFoundHeading')}</h1>
         <p className="mb-7 max-w-md text-sm text-ink-500">{t('errors.notFoundMessage')}</p>
 
         <div className="flex flex-wrap justify-center gap-3">

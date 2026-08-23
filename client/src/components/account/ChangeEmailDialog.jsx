@@ -113,9 +113,6 @@ export default function ChangeEmailDialog({
       open={open}
       onClose={working ? () => {} : onClose}
       title={t('profile.emailChange.title')}
-      // Slides up from the bottom edge on phones, like the deactivation dialog
-      // this one is deliberately built to feel like.
-      sheet
       footer={
         <>
           {/*

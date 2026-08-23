@@ -12,6 +12,9 @@ import { formatDate, formatPrice } from '../../utils/format';
 import Seo from '../../components/common/Seo';
 import Icon from '../../components/common/Icon';
 import Spinner from '../../components/common/Spinner';
+import EmptyState from '../../components/common/EmptyState';
+import SectionError from '../../components/common/SectionError';
+import { CompactRowSkeleton } from '../../components/common/Skeleton';
 import PhoneInput from '../../components/common/PhoneInput';
 import StatusBadge from '../../components/common/StatusBadge';
 import UserAvatar from '../../components/common/UserAvatar';
@@ -213,6 +216,8 @@ export default function Profile() {
     <div className="space-y-5">
       <Seo title={t('common:nav.myProfile')} noIndex />
 
+      <h1 className="panel-title">{t('common:nav.myProfile')}</h1>
+
       <ChangeEmailDialog
         open={otpOpen}
         sent={emailSent}
@@ -262,7 +267,7 @@ export default function Profile() {
                 type="button"
                 onClick={() => fileRef.current?.click()}
                 disabled={photoBusy}
-                className="btn-outline !py-2 text-sm"
+                className="btn-outline btn-sm"
               >
                 {t(hasPhoto ? 'photo.change' : 'photo.upload')}
               </button>
@@ -429,15 +434,27 @@ export default function Profile() {
           </Link>
         </div>
 
-        {orders.loading ? (
-          <p className="py-6 text-center text-sm text-ink-400">{t('orders.loading')}</p>
+        {/* Error before empty, and never the other way round: a fetch that failed
+            is not the same news as "you have never ordered anything", and telling
+            a shopper with an order history that they have none is the worse of
+            the two mistakes. Same ladder as /account/orders. */}
+        {orders.error && !recentOrders.length ? (
+          <SectionError
+            gutter={false}
+            message={orders.error.message}
+            onRetry={orders.refetch}
+          />
+        ) : orders.loading ? (
+          <CompactRowSkeleton rows={3} />
         ) : !recentOrders.length ? (
-          <div className="py-8 text-center">
-            <p className="mb-3 text-sm text-ink-500">{t('orders.noneYet')}</p>
-            <Link to="/products" className="btn-primary">
-              {t('orders.startShopping')}
-            </Link>
-          </div>
+          <EmptyState
+            compact
+            icon="package"
+            title={t('orders.emptyTitle')}
+            message={t('orders.noneYet')}
+            actionLabel={t('orders.startShopping')}
+            actionTo="/products"
+          />
         ) : (
           <div className="divide-y divide-ink-100">
             {recentOrders.map((order) => (

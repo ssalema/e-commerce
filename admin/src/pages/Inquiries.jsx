@@ -54,7 +54,7 @@ export default function Inquiries() {
     <Box>
       <PageHeader
         title="Inquiries"
-        subtitle="Messages, newsletter sign-ups and job applications submitted through the website."
+        subtitle="Messages, newsletter sign-ups and job applications submitted through the website"
         breadcrumbs={[{ label: 'Inquiries' }]}
         action={
           tab === 'careers' ? (

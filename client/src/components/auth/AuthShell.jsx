@@ -39,7 +39,7 @@ export default function AuthShell({ title, subtitle, children, footer }) {
             <BrandMark tileClassName="text-white" nameClassName="text-ink-900" />
           </Link>
 
-          <h1 className="mb-1.5 text-2xl font-extrabold text-ink-900">{title}</h1>
+          <h1 className="mb-1.5 display-title">{title}</h1>
           {subtitle && <p className="mb-7 text-sm text-ink-500">{subtitle}</p>}
 
           {children}

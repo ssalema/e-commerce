@@ -162,7 +162,7 @@ export default function ImageViewer({
   const dimming = phase === 'open' ? 1 - Math.min((drag?.y ?? 0) / (DISMISS_DISTANCE * 2), 0.6) : 0;
 
   return createPortal(
-    <div ref={overlayRef} className="fixed inset-0 z-[120] flex items-end justify-center">
+    <div ref={overlayRef} className="fixed inset-0 z-viewer flex items-end justify-center">
       <div
         className="absolute inset-0 bg-ink-900/60"
         style={{ opacity: dimming, transition: drag ? 'none' : `opacity ${DURATION}ms ${EASING}` }}

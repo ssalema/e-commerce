@@ -6,10 +6,21 @@ const asyncHandler = require('../utils/asyncHandler');
 const User = require('../models/User');
 const sessionService = require('../services/session.service');
 
+/**
+ * The access token, and only from the Authorization header.
+ *
+ * There is deliberately no cookie fallback. Nothing in this API sets an
+ * `accessToken` cookie, so reading one only ever mattered if something started
+ * to — and the moment it did, every authenticated route would have become
+ * forgeable from another site: the refresh cookie is `SameSite=None` in
+ * production and there is no CSRF token anywhere, because auth is supposed to
+ * live in a header a cross-site form cannot set. Keeping the read out is what
+ * makes that assumption hold. The refresh cookie stays a cookie; it is exchanged
+ * at `/auth/refresh` and is useless on its own.
+ */
 function extractToken(req) {
   const header = req.headers.authorization;
   if (header?.startsWith('Bearer ')) return header.slice(7).trim();
-  if (req.cookies?.accessToken) return req.cookies.accessToken;
   return null;
 }
 

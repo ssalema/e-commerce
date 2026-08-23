@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { fetchWishlist } from '../store/wishlistSlice';
 import { useLiveRefetch } from '../realtime/useRealtime';
 import { CATALOG_EVENTS } from '../realtime/events';
+import { PRODUCT_GRID_COLUMNS } from '../utils/constants';
 import Seo from '../components/common/Seo';
 import Breadcrumb from '../components/common/Breadcrumb';
 import ProductGrid from '../components/product/ProductGrid';
@@ -65,7 +66,7 @@ export default function Wishlist() {
           <ProductGrid
             products={products}
             loading={loading && !products.length}
-            columns="grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+            columns={PRODUCT_GRID_COLUMNS.full}
             emptyTitle={t('wishlist.emptyTitle')}
             emptyMessage={t('wishlist.emptyMessage')}
             emptyAction={{ label: t('wishlist.browse'), to: '/products' }}

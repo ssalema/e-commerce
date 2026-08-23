@@ -20,7 +20,6 @@ import TextField from '@mui/material/TextField';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Switch from '@mui/material/Switch';
 import CircularProgress from '@mui/material/CircularProgress';
-import LinearProgress from '@mui/material/LinearProgress';
 import Tooltip from '@mui/material/Tooltip';
 
 import AddIcon from '@mui/icons-material/Add';
@@ -37,8 +36,10 @@ import { BRAND_EVENTS } from '../realtime/events';
 import PageHeader from '../components/common/PageHeader';
 import EmptyState from '../components/common/EmptyState';
 import ErrorState from '../components/common/ErrorState';
+import StatusChip from '../components/common/StatusChip';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import ImageUploader from '../components/products/ImageUploader';
+import CardGridSkeleton from '../components/common/CardGridSkeleton';
 
 const EMPTY_BRAND = {
   name: '',
@@ -287,7 +288,7 @@ function BrandDialog({ initial, brandCount, onClose, onSaved }) {
           disabled={saving}
           startIcon={saving ? <CircularProgress size={15} color="inherit" /> : null}
         >
-          Save
+          Save brand
         </Button>
       </DialogActions>
     </Dialog>
@@ -324,16 +325,22 @@ export default function Brands() {
         breadcrumbs={[{ label: 'Brands' }]}
         action={
           <Button variant="contained" startIcon={<AddIcon />} onClick={() => setDialog({})}>
-            Add Brand
+            Add brand
           </Button>
         }
       />
 
-      {query.loading && <LinearProgress sx={{ mb: 2 }} />}
-
       {/* A failed load has to say so: falling through to the empty state below would
           tell the reader they stock no brands when the list only could not be read. */}
-      {!query.loading && query.error ? (
+      {query.loading ? (
+        <CardGridSkeleton
+          count={6}
+          size={{ xs: 12, md: 6, xl: 4 }}
+          minHeight={CARD_HEIGHT}
+          thumbSize={52}
+          listRows={VISIBLE_PRODUCT_ROWS}
+        />
+      ) : query.error ? (
         <Card>
           <ErrorState
             title="Could not load the brands"
@@ -341,12 +348,12 @@ export default function Brands() {
             onRetry={query.refetch}
           />
         </Card>
-      ) : !query.loading && brands.length === 0 ? (
+      ) : brands.length === 0 ? (
         <Card>
           <EmptyState
             title="No brands yet"
             message="Add the brands you stock — the product form offers this list, and shoppers filter by it."
-            actionLabel="Add Brand"
+            actionLabel="Add brand"
             onAction={() => setDialog({})}
           />
         </Card>
@@ -400,7 +407,7 @@ export default function Brands() {
                           <Typography variant="h6" noWrap>
                             {brand.name}
                           </Typography>
-                          {!brand.isActive && <Chip label="Hidden" size="small" color="warning" />}
+                          {!brand.isActive && <StatusChip status="inactive" kind="availability" />}
                           {brand.isFeatured && <Chip label="Featured" size="small" color="primary" />}
                         </Stack>
                         <Typography variant="caption" color="text.secondary">

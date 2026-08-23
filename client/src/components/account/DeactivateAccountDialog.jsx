@@ -169,7 +169,6 @@ export default function DeactivateAccountDialog({ open, onClose, onDeactivated, 
         open={open}
         onClose={working ? () => {} : onClose}
         title={t('settings.deactivateVerifyTitle')}
-        sheet
         footer={
           <>
             <button
@@ -250,9 +249,6 @@ export default function DeactivateAccountDialog({ open, onClose, onDeactivated, 
       open={open}
       onClose={working ? () => {} : onClose}
       title={t('settings.deactivateReasonTitle')}
-      // Slides up from the bottom edge on phones, like the cancel-order dialog
-      // this one is deliberately built to feel like.
-      sheet
       footer={
         <>
           <button type="button" onClick={onClose} disabled={working} className="btn-outline">

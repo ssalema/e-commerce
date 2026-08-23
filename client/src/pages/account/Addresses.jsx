@@ -55,7 +55,7 @@ export default function Addresses() {
       <Seo title={t('addresses.title')} noIndex />
 
       <div className="mb-5 flex items-center justify-between">
-        <h1 className="text-xl font-bold text-ink-900">{t('addresses.title')}</h1>
+        <h1 className="panel-title">{t('addresses.title')}</h1>
         <button
           type="button"
           onClick={() => {

@@ -144,7 +144,7 @@ export default function Login() {
                 size="large"
                 fullWidth
                 disabled={loading}
-                startIcon={loading ? <CircularProgress size={16} color="inherit" /> : null}
+                startIcon={loading ? <CircularProgress size={15} color="inherit" /> : null}
               >
                 Sign in
               </Button>

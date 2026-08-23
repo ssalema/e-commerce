@@ -9,10 +9,24 @@ const OTP_LENGTH = env.otp.length;
 const INTERVIEW_MODE_VALUES = INTERVIEW_MODES.map((mode) => mode.value);
 
 const MAX_REVIEW_MEDIA = require('../models/Review').MAX_MEDIA;
+const { isOwnedAsset } = require('../config/cloudinary');
 
 /** Only URLs Cloudinary handed us back count as an attachment. */
 const isStoreAsset = (value) =>
   typeof value === 'string' && /^https:\/\/res\.cloudinary\.com\/[\w-]+\//.test(value);
+
+/**
+ * Only public ids inside the review namespace.
+ *
+ * Deliberately narrower than "somewhere in this store": a review's public ids are
+ * the handles its own edit and delete pass to Cloudinary's destroy, so whatever
+ * this accepts is what a shopper can have deleted. The product photos and banners
+ * are in this store too — scoping to `reviews/` is what keeps a review from
+ * naming one. Uploads through /uploads/media land here for non-staff, so a
+ * genuine attachment always satisfies it.
+ */
+const REVIEW_ASSET_FOLDER = 'reviews';
+const isReviewPublicId = (value) => isOwnedAsset(String(value), REVIEW_ASSET_FOLDER);
 
 module.exports = {
   ...require('./common.validators'),
@@ -136,6 +150,17 @@ module.exports = {
    * thing — so the only field is the reference staff can quote back later.
    */
   refundRules: [body('refundReference').optional({ values: 'falsy' }).trim().isLength({ max: 80 })],
+
+  /**
+   * The gateway refund, which is the one place a number from a request body turns
+   * into money leaving the account. Blank means "the full captured amount" and is
+   * the normal case; a partial refund has to be a positive figure, and the
+   * controller still caps it at what was actually captured.
+   */
+  paymentRefundRules: [
+    body('amount').optional({ values: 'falsy' }).isFloat({ gt: 0 }).withMessage('Refund amount must be greater than zero').toFloat(),
+    body('reason').optional({ values: 'falsy' }).trim().isLength({ max: 200 }),
+  ],
 
   cancellationReasonRules: [
     body('label').trim().isLength({ min: 3, max: 120 }).withMessage('Reason must be 3-120 characters'),
@@ -298,7 +323,38 @@ module.exports = {
       .optional({ values: 'falsy' })
       .custom(isStoreAsset)
       .withMessage('Attachments must be uploaded through this store'),
-    body('media.*.publicId').optional({ values: 'falsy' }).isString().trim(),
+    /*
+     * The public id is the delete handle, not a label: editing or deleting a
+     * review passes whatever is stored here straight to Cloudinary's destroy.
+     * Left as a free string it was a way to name someone else's asset — a
+     * product photo, a banner — and have the store delete it on request. So it
+     * is held to this store's own folder, the same shape `isOwnedAsset` enforces
+     * again at the Cloudinary boundary.
+     */
+    body('media.*.publicId')
+      .optional({ values: 'falsy' })
+      .isString()
+      .trim()
+      .custom(isReviewPublicId)
+      .withMessage('Attachments must be uploaded through this store'),
+
+    /*
+     * The older photo-only field, still accepted from clients that have not moved
+     * to `media`. It gets the same treatment for the same reason — an unchecked
+     * url here is a remote image of the author's choosing rendered on a product
+     * page, which is a tracking pixel aimed at every visitor.
+     */
+    body('images')
+      .optional({ values: 'null' })
+      .isArray({ max: MAX_REVIEW_MEDIA })
+      .withMessage(`You can attach at most ${MAX_REVIEW_MEDIA} photos`),
+    body('images.*.url').custom(isStoreAsset).withMessage('Photos must be uploaded through this store'),
+    body('images.*.publicId')
+      .optional({ values: 'falsy' })
+      .isString()
+      .trim()
+      .custom(isReviewPublicId)
+      .withMessage('Photos must be uploaded through this store'),
   ],
 
   couponRules: [

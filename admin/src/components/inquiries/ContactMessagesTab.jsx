@@ -98,6 +98,14 @@ export default function ContactMessagesTab({ onCountsChanged }) {
     filters.sort !== DEFAULT_FILTERS.sort ||
     !range.isDefault;
 
+  // Named rather than inlined on the button: the filtered-empty state offers the
+  // same reset, so a miss caused by the filters carries its own way out.
+  const resetFilters = () => {
+    setFilters(DEFAULT_FILTERS);
+    range.reset();
+    setPage(1);
+  };
+
   /** Opening the detail dialog marks the message read server-side. */
   const open = async (row) => {
     setViewing(row);
@@ -164,7 +172,7 @@ export default function ContactMessagesTab({ onCountsChanged }) {
       align: 'center',
       width: 110,
       render: (row) => (
-        <Stack direction="row" spacing={0.5} justifyContent="center">
+        <Stack direction="row" spacing={0.25} justifyContent="center">
           <Tooltip title="View message">
             <IconButton size="small" color="primary" onClick={() => open(row)}>
               <VisibilityIcon fontSize="small" />
@@ -238,14 +246,7 @@ export default function ContactMessagesTab({ onCountsChanged }) {
         ))}
       </TextField>
 
-      <ResetFiltersButton
-        disabled={!isFiltered}
-        onClick={() => {
-          setFilters(DEFAULT_FILTERS);
-          range.reset();
-          setPage(1);
-        }}
-      />
+      <ResetFiltersButton disabled={!isFiltered} onClick={resetFilters} />
     </Stack>
   );
 
@@ -257,6 +258,7 @@ export default function ContactMessagesTab({ onCountsChanged }) {
         loading={query.loading}
         error={query.error}
         onRetry={query.refetch}
+        errorTitle="Could not load the messages"
         page={page}
         limit={limit}
         total={meta?.total || 0}
@@ -272,6 +274,7 @@ export default function ContactMessagesTab({ onCountsChanged }) {
             ? 'Try a different search term or widen the date range.'
             : 'Enquiries submitted through the storefront contact form land here.'
         }
+        emptyAction={isFiltered ? { label: 'Reset filters', onClick: resetFilters } : undefined}
       />
 
       <InquiryDetailDialog

@@ -14,6 +14,7 @@ import Typography from '@mui/material/Typography';
 import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
+import Skeleton from '@mui/material/Skeleton';
 import CircularProgress from '@mui/material/CircularProgress';
 
 import CloseIcon from '@mui/icons-material/Close';
@@ -152,10 +153,32 @@ export default function ReactivationRequestDialog({ requestId, onClose, onDecide
       </DialogTitle>
 
       <DialogContent dividers>
+        {/* The shape of the request that is coming — the customer's row, then the
+            field pairs under it — rather than a spinner over an empty dialog. The
+            panel holds the layout still everywhere else it waits; this was the
+            last place that dropped it. */}
         {loading && (
-          <Box sx={{ display: 'grid', placeItems: 'center', py: 6 }}>
-            <CircularProgress size={26} />
-          </Box>
+          <Stack spacing={2.5}>
+            <Stack direction="row" spacing={2} alignItems="center">
+              <Skeleton variant="circular" width={48} height={48} sx={{ flexShrink: 0 }} />
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <Skeleton variant="text" width="45%" height={26} />
+                <Skeleton variant="text" width="65%" height={20} />
+              </Box>
+              <Skeleton variant="rounded" width={78} height={24} sx={{ flexShrink: 0 }} />
+            </Stack>
+
+            <Divider />
+
+            <Grid container spacing={2}>
+              {Array.from({ length: 6 }).map((_, index) => (
+                <Grid key={index} size={{ xs: 12, sm: 6 }}>
+                  <Skeleton variant="text" width={110} height={16} />
+                  <Skeleton variant="text" width="80%" height={22} />
+                </Grid>
+              ))}
+            </Grid>
+          </Stack>
         )}
 
         {!loading && failed && <Alert severity="error">{failed}</Alert>}

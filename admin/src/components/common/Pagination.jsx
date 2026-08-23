@@ -18,8 +18,8 @@ const navButtonSx = {
   border: 1,
   borderColor: 'divider',
   color: 'text.secondary',
-  '&:hover': { bgcolor: 'action.hover', borderColor: '#cbd5e1' },
-  '&.Mui-disabled': { borderColor: 'divider', color: '#cbd5e1' },
+  '&:hover': { bgcolor: 'action.hover', borderColor: 'grey.300' },
+  '&.Mui-disabled': { borderColor: 'divider', color: 'text.disabled' },
 };
 
 function NavButton({ title, disabled, onClick, children }) {

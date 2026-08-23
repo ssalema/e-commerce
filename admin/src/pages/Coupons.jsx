@@ -36,6 +36,7 @@ import { EVENTS } from '../realtime/events';
 import { formatPrice, formatDate } from '../utils/format';
 import PageHeader from '../components/common/PageHeader';
 import DataTable from '../components/common/DataTable';
+import StatusChip from '../components/common/StatusChip';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import ResetFiltersButton from '../components/common/ResetFiltersButton';
 
@@ -622,10 +623,9 @@ export default function Coupons() {
       render: (row) => {
         const expired = new Date(row.expiresAt) < new Date();
         const chip = (
-          <Chip
-            label={expired ? 'Expired' : row.isActive ? 'Active' : 'Inactive'}
-            size="small"
-            color={expired ? 'error' : row.isActive ? 'success' : 'default'}
+          <StatusChip
+            status={expired ? 'expired' : row.isActive ? 'active' : 'inactive'}
+            kind="availability"
           />
         );
 
@@ -677,7 +677,7 @@ export default function Coupons() {
         breadcrumbs={[{ label: 'Coupons' }]}
         action={
           <Button variant="contained" startIcon={<AddIcon />} onClick={() => setDialog({})}>
-            Create Coupon
+            Add coupon
           </Button>
         }
       />
@@ -689,6 +689,7 @@ export default function Coupons() {
         loading={query.loading}
         error={query.error}
         onRetry={query.refetch}
+        errorTitle="Could not load the coupons"
         page={page}
         limit={limit}
         total={meta?.total || 0}
@@ -706,7 +707,7 @@ export default function Coupons() {
         emptyAction={
           isFiltered
             ? { label: 'Reset filters', onClick: resetFilters }
-            : { label: 'Create Coupon', onClick: () => setDialog({}) }
+            : { label: 'Add coupon', onClick: () => setDialog({}) }
         }
         toolbar={
           <Stack

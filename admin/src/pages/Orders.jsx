@@ -271,6 +271,7 @@ export default function Orders() {
         loading={query.loading}
         error={query.error}
         onRetry={query.refetch}
+        errorTitle="Could not load the orders"
         // The row opens the order, the way a reactivation row opens its request —
         // the eye icon stays for the people who aim at it, but the whole row is the
         // target. The status control lives in its own dialog, so nothing in a cell

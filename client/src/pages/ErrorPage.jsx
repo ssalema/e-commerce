@@ -1,5 +1,6 @@
 import { useRouteError, isRouteErrorResponse, useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import Seo from '../components/common/Seo';
 import Icon from '../components/common/Icon';
 
 /**
@@ -34,13 +35,17 @@ export default function ErrorPage() {
 
   return (
     <div className="container-page flex min-h-[70vh] flex-col items-center justify-center text-center">
+      {/* The one route that was leaving the previous page's <title> in the tab —
+          which reads as "still on that page" while looking at a crash screen. */}
+      <Seo title={title} noIndex />
+
       <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-red-50 text-danger">
         <Icon name="alert" size={36} />
       </div>
 
       {status && <p className="mb-2 text-5xl font-black text-ink-300">{status}</p>}
 
-      <h1 className="mb-2 text-2xl font-bold text-ink-900">{title}</h1>
+      <h1 className="mb-2 display-title">{title}</h1>
       <p className="mb-7 max-w-md text-sm text-ink-500">{message}</p>
 
       <div className="flex flex-wrap justify-center gap-3">

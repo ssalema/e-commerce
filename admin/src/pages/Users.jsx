@@ -242,12 +242,18 @@ export default function Users() {
                 : 'Click to toggle active / blocked'
             }
           >
-            <Box
-              component="span"
-              onClick={() => onStatusClick(row)}
-              sx={{ cursor: selfClosed ? 'help' : 'pointer', display: 'inline-block' }}
-            >
-              <StatusChip status={row.status} kind="user" />
+            <Box component="span" sx={{ display: 'inline-block' }}>
+              {/* The chip carries its own click rather than sitting inside a
+                  clickable span, so it is focusable and answers Enter and Space.
+                  A closed account keeps the handler — clicking it is how someone
+                  is told that reopening happens under Reactivation Requests — but
+                  keeps the help cursor, since nothing here will toggle. */}
+              <StatusChip
+                status={row.status}
+                kind="user"
+                onClick={() => onStatusClick(row)}
+                sx={selfClosed ? { cursor: 'help' } : undefined}
+              />
 
               {selfClosed && row.deactivation?.at && (
                 <Typography
@@ -296,6 +302,7 @@ export default function Users() {
         loading={query.loading}
         error={query.error}
         onRetry={query.refetch}
+        errorTitle="Could not load the users"
         verticalAlign="top"
         page={page}
         limit={limit}

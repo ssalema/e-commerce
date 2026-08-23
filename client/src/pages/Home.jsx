@@ -154,6 +154,11 @@ export default function Home() {
         jsonLd={seoJsonLd}
       />
 
+      {/* The hero carries the page visually, so the heading is for the machines and
+          the screen readers only — without it this route's outline opened at <h2>,
+          which is the one heading level that is supposed to have a parent. */}
+      <h1 className="sr-only">{`${siteName} — ${t('home.seoTitle')}`}</h1>
+
       {bannersFailed ? (
         <SectionError
           className="pt-4"

@@ -185,7 +185,7 @@ export default function ReactivationRequests() {
     <Box>
       <PageHeader
         title="Account Reactivation Requests"
-        subtitle="Customers who deactivate their account and have verified their identity to come back."
+        subtitle="Customers who deactivate their account and have verified their identity to come back"
         breadcrumbs={[{ label: 'Users', to: '/users' }, { label: 'Reactivation Requests' }]}
       />
 
@@ -228,6 +228,7 @@ export default function ReactivationRequests() {
         loading={query.loading}
         error={query.error}
         onRetry={query.refetch}
+        errorTitle="Could not load the reactivation requests"
         page={page}
         limit={limit}
         total={meta?.total || 0}

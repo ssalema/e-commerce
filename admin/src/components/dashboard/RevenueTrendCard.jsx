@@ -186,7 +186,7 @@ export default function RevenueTrendCard() {
         justifyContent="space-between"
         alignItems={{ xs: 'flex-start', sm: 'center' }}
         spacing={1.5}
-        sx={{ px: 2, py: 1.5, bgcolor: '#f8fafc' }}
+        sx={{ px: 2, py: 1.5, bgcolor: 'grey.50' }}
       >
         <Box>
           <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: 0.6 }}>

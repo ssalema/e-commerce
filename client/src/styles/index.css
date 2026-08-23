@@ -54,13 +54,29 @@
   .btn-danger {
     @apply btn bg-danger text-white hover:bg-red-700;
   }
-
+  /*
+   * A destructive action that is not the panel's primary move — "Cancel order"
+   * standing beside "Download invoice". It reads as an outline button until you
+   * notice the colour, which is the right weight for a thing the shopper is
+   * offered rather than pushed towards.
+   */
+  .btn-outline-danger {
+    @apply btn border border-ink-300 bg-white text-danger hover:border-danger hover:bg-red-50;
+  }
 
   /*
    * Size variants. Declared after the colour variants so their padding wins on
    * equal specificity — that is what lets a call site write `btn-primary btn-lg`
    * instead of forcing the padding through with `!`.
    */
+  /* Slightly tighter than the default — a secondary action inside a card. */
+  .btn-sm {
+    @apply px-4 py-2 text-sm;
+  }
+  /* The compact one: a product tile's add-to-cart, a sidebar's reset. */
+  .btn-xs {
+    @apply px-3 py-2 text-xs;
+  }
   .btn-lg {
     @apply px-6 py-3 text-sm;
   }
@@ -85,6 +101,19 @@
   .input-error {
     @apply border-danger focus:border-danger focus:ring-red-100;
   }
+  /*
+   * Modifiers, declared after `.input` so they win on equal specificity — the
+   * same reason the button sizes sit below the button colours. Without them a
+   * tighter field had to force its padding through with `!`, and five call sites
+   * were doing exactly that.
+   */
+  .input-sm {
+    @apply py-2;
+  }
+  /* A field that sizes to its content — an inline sort or filter select. */
+  .input-auto {
+    @apply w-auto;
+  }
   .label {
     @apply mb-1.5 block text-sm font-medium text-ink-700;
   }
@@ -96,6 +125,14 @@
     @apply inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset;
   }
 
+  /*
+   * The four heading tiers. Every <h1> in the app is one of these — a heading
+   * written from loose utilities is a heading that drifts, which is how the same
+   * screen ended up with `font-bold` on one page and `font-extrabold` on its
+   * neighbour.
+   */
+
+  /* Shop surfaces — cart, wishlist, listing, product. */
   .section-title {
     @apply text-xl font-bold text-ink-900 sm:text-2xl;
   }
@@ -103,6 +140,19 @@
   /* Page-level heading for the content pages — about, careers, contact, faq, policies. */
   .page-title {
     @apply text-3xl font-black text-ink-900 sm:text-4xl;
+  }
+
+  /* The account panels, which sit inside their own chrome and do not step up on wide screens. */
+  .panel-title {
+    @apply text-xl font-bold text-ink-900;
+  }
+
+  /*
+   * A screen that is one moment rather than a page of content — sign in, order
+   * placed, 404, a crash. Centred, standalone, and the only thing being said.
+   */
+  .display-title {
+    @apply text-2xl font-extrabold text-ink-900;
   }
 
   /* Shimmer used by every loading skeleton. */
@@ -130,6 +180,41 @@
       currentColor calc(50% + 0.5px),
       transparent calc(50% + 0.5px)
     );
+  }
+
+  /*
+   * The stacking ladder, in one place.
+   *
+   * These were seven arbitrary values — z-40, z-50, z-[60], z-[70], z-[95],
+   * z-[100], z-[120] — spread across as many files, with nothing anywhere
+   * recording which was meant to sit over which. It happened to be right; it was
+   * one careless `z-[80]` away from not being. Naming the rungs means a new
+   * overlay picks a layer rather than a number.
+   *
+   * Bottom to top: a panel hanging off the nav, the sticky header and its search
+   * results, the mobile category sheet, the bars pinned to the bottom edge, any
+   * dialog, and the fullscreen media viewer over everything.
+   *
+   * Values below z-40 stay as plain utilities — those order children inside a
+   * single component and never compete with anything on this ladder.
+   */
+  .z-nav-panel {
+    @apply z-40;
+  }
+  .z-header {
+    @apply z-50;
+  }
+  .z-mobile-sheet {
+    @apply z-[60];
+  }
+  .z-bottom-bar {
+    @apply z-[70];
+  }
+  .z-dialog {
+    @apply z-[100];
+  }
+  .z-viewer {
+    @apply z-[120];
   }
 
   .hide-scrollbar {

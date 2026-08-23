@@ -71,7 +71,7 @@ export default function Header() {
 
   return (
     /* Sticky so search and the account menu are always one tap away while browsing. */
-    <header className="sticky top-0 z-50 shadow-header">
+    <header className="sticky top-0 z-header shadow-header">
       {/* relative + z-20 keeps the account dropdown above the category strip below. */}
       <div className="relative z-20 bg-ink-900 text-white">
         <div className="container-page flex items-center gap-3 py-3 lg:gap-6">

@@ -117,7 +117,7 @@ export default function SearchBar({ className = '', autoFocus = false, onNavigat
       </div>
 
       {open && term.trim().length >= 2 && (
-        <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-50 max-h-[70vh] animate-fade-in overflow-y-auto rounded-xl border border-ink-200 bg-white py-2 shadow-card-hover">
+        <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-header max-h-[70vh] animate-fade-in overflow-y-auto rounded-xl border border-ink-200 bg-white py-2 shadow-card-hover">
           {!hasResults && !loading && (
             <p className="px-4 py-6 text-center text-sm text-ink-500">
               {/* <Trans> keeps the emphasis on the search term where a language

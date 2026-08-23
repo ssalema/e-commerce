@@ -210,6 +210,8 @@ export default function Checkout() {
           className="mb-4"
         />
 
+        <h1 className="mb-4 section-title">{t('checkout.title')}</h1>
+
         {/* The step tracker is checkout navigation — it has no job once the order is placed. */}
         {!confirmingId && (
           <div className="mb-6 flex items-center gap-2 sm:gap-4">

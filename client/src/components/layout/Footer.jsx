@@ -9,6 +9,7 @@ import { mapPlaceUrl } from '../../utils/maps';
 import { formatPhone, telHref } from '../../utils/format';
 import BrandMark from '../common/BrandMark';
 import Icon from '../common/Icon';
+import Spinner from '../common/Spinner';
 
 /*
  * These lists carry translation *keys*, not copy — the labels are resolved inside
@@ -361,7 +362,7 @@ export default function Footer() {
               disabled={subscribing}
               className="btn-primary shrink-0 px-3.5 py-2"
             >
-              <Icon name={subscribing ? 'refresh' : 'send'} size={16} />
+              {subscribing ? <Spinner size={16} /> : <Icon name="send" size={16} />}
             </button>
           </form>
 

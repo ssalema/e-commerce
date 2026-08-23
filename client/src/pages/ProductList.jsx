@@ -4,14 +4,15 @@ import { useSelector } from 'react-redux';
 import { useTranslation } from 'react-i18next';
 import { productApi } from '../api/endpoints';
 import useFetch from '../hooks/useFetch';
-import useScrollLock from '../hooks/useScrollLock';
+import useMediaQuery from '../hooks/useMediaQuery';
 import { useLiveRefetch } from '../realtime/useRealtime';
 import { CATALOG_EVENTS } from '../realtime/events';
-import { SORT_OPTIONS } from '../utils/constants';
+import { PRODUCT_GRID_COLUMNS, SORT_OPTIONS } from '../utils/constants';
 import Seo from '../components/common/Seo';
 import Icon from '../components/common/Icon';
 import Breadcrumb from '../components/common/Breadcrumb';
 import Pagination from '../components/common/Pagination';
+import Modal from '../components/common/Modal';
 import ErrorState from '../components/common/ErrorState';
 import ProductGrid from '../components/product/ProductGrid';
 import FilterSidebar from '../components/product/FilterSidebar';
@@ -30,8 +31,8 @@ export default function ProductList() {
   const [searchParams, setSearchParams] = useSearchParams();
   const categories = useSelector((s) => s.catalog.categories);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
-  // The filter sheet scrolls on its own; the results grid behind it stays still.
-  const filterSheetRef = useScrollLock(mobileFiltersOpen);
+  // Mirrors the lg:hidden on the button that opens it — see the dialog below.
+  const isDesktop = useMediaQuery('(min-width: 1024px)');
 
   const filters = useMemo(() => {
     const result = {};
@@ -151,7 +152,7 @@ export default function ProductList() {
               <select
                 value={sort}
                 onChange={(e) => updateParams({ sort: e.target.value })}
-                className="input !w-auto !py-2 text-sm"
+                className="input input-sm input-auto"
                 aria-label={t('list.sortAria')}
               >
                 {SORT_OPTIONS.map((value) => (
@@ -209,7 +210,7 @@ export default function ProductList() {
                   products={products}
                   loading={loading}
                   skeletonCount={12}
-                  columns="grid-cols-2 sm:grid-cols-3 xl:grid-cols-4"
+                  columns={PRODUCT_GRID_COLUMNS.withSidebar}
                   emptyTitle={t('list.emptyTitle')}
                   emptyMessage={t('list.emptyMessage')}
                   emptyAction={{ label: t('filters.reset'), onClick: resetFilters }}
@@ -229,47 +230,40 @@ export default function ProductList() {
         </div>
       </div>
 
-      {mobileFiltersOpen && (
-        <div ref={filterSheetRef} className="fixed inset-0 z-[95] lg:hidden">
-          <div
-            className="absolute inset-0 bg-ink-900/50"
+      {/*
+       * The filters are a dialog like every other dialog, so they are <Modal>
+       * rather than a second hand-built sheet. This one used to reimplement the
+       * overlay, the panel and the close button, and in doing so shipped without
+       * the three things Modal does that are not visible: the focus trap, the
+       * Escape key, and the dialog role that tells a screen reader the grid
+       * behind has been covered.
+       *
+       * `!isDesktop` is the `lg:hidden` the old wrapper carried — a portalled
+       * dialog cannot be hidden by a class on an ancestor, so the rule moves to
+       * whether it opens at all.
+       */}
+      <Modal
+        open={mobileFiltersOpen && !isDesktop}
+        onClose={() => setMobileFiltersOpen(false)}
+        title={t('filters.title')}
+        size="lg"
+        footer={
+          <button
+            type="button"
             onClick={() => setMobileFiltersOpen(false)}
-            aria-hidden="true"
-          />
-          <div className="absolute bottom-0 left-0 right-0 max-h-[85vh] animate-slide-up overflow-y-auto rounded-t-2xl bg-white">
-            <div className="sticky top-0 flex items-center justify-between border-b border-ink-200 bg-white px-4 py-3">
-              <h2 className="text-base font-bold text-ink-900">{t('filters.title')}</h2>
-              <button
-                type="button"
-                onClick={() => setMobileFiltersOpen(false)}
-                className="rounded-lg p-1.5 text-ink-400 hover:bg-ink-100"
-                aria-label={t('filters.close')}
-              >
-                <Icon name="close" size={20} />
-              </button>
-            </div>
-
-            <div className="px-4 pb-4">
-              <FilterSidebar
-                filters={filters}
-                onChange={updateParams}
-                onReset={resetFilters}
-                meta={filterMeta}
-              />
-            </div>
-
-            <div className="sticky bottom-0 border-t border-ink-200 bg-white p-4">
-              <button
-                type="button"
-                onClick={() => setMobileFiltersOpen(false)}
-                className="btn-primary w-full"
-              >
-                {t('filters.showCount', { count: meta?.total ?? 0 })}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+            className="btn-primary w-full"
+          >
+            {t('filters.showCount', { count: meta?.total ?? 0 })}
+          </button>
+        }
+      >
+        <FilterSidebar
+          filters={filters}
+          onChange={updateParams}
+          onReset={resetFilters}
+          meta={filterMeta}
+        />
+      </Modal>
     </>
   );
 }

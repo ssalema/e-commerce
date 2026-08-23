@@ -94,7 +94,7 @@ export default function CategoryNav() {
 
                 {hasChildren && isOpen && (
                   <div
-                    className="absolute left-0 right-0 top-full z-40 animate-fade-in border-t border-ink-200 bg-white shadow-card-hover"
+                    className="absolute left-0 right-0 top-full z-nav-panel animate-fade-in border-t border-ink-200 bg-white shadow-card-hover"
                     onMouseEnter={() => open(category._id)}
                     onMouseLeave={scheduleClose}
                   >

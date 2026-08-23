@@ -7,7 +7,7 @@ import Skeleton from '@mui/material/Skeleton';
 import { BarChart } from '@mui/x-charts/BarChart';
 
 import { formatNumber, formatPrice } from '../../utils/format';
-import { ACCENT, chartAxisSx, compactNumber } from './chartTokens';
+import { ACCENT, CATEGORY_INK, ON_SERIES_INK, chartAxisSx, compactNumber } from './chartTokens';
 
 const MAX_LABEL_CHARS = 26;
 const CHAR_WIDTH = 7; // ≈ average advance of the 12px axis font
@@ -81,8 +81,8 @@ export default function TopProductsCard({ products = [], loading, action }) {
             slotProps={{ legend: { hidden: true } }}
             sx={{
               ...chartAxisSx,
-              '& .MuiChartsAxis-tickLabel': { fill: '#475569', fontSize: 12 },
-              '& .MuiBarLabel-root': { fill: '#ffffff', fontWeight: 700, fontSize: 12 },
+              '& .MuiChartsAxis-tickLabel': { fill: CATEGORY_INK, fontSize: 12 },
+              '& .MuiBarLabel-root': { fill: ON_SERIES_INK, fontWeight: 700, fontSize: 12 },
             }}
           />
         )}

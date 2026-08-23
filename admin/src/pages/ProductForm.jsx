@@ -12,7 +12,7 @@ import StepLabel from '@mui/material/StepLabel';
 import StepButton from '@mui/material/StepButton';
 import Divider from '@mui/material/Divider';
 import CircularProgress from '@mui/material/CircularProgress';
-import LinearProgress from '@mui/material/LinearProgress';
+import Skeleton from '@mui/material/Skeleton';
 import Typography from '@mui/material/Typography';
 
 import ArrowBackIcon from '@mui/icons-material/ArrowBackIosNew';
@@ -87,6 +87,66 @@ function validateStep(step, values) {
   }
 
   return errors;
+}
+
+/**
+ * The form's outline while an existing product is being read.
+ *
+ * Only edit mode ever waits — a new product has nothing to fetch — so the title and
+ * the breadcrumb are already known and stay as words. The wizard's chrome is drawn
+ * in place of a bare progress bar so the step rail, the fields and the footer do not
+ * arrive as one jump.
+ */
+function ProductFormSkeleton() {
+  return (
+    <Box>
+      <PageHeader
+        title="Edit Product"
+        subtitle={<Skeleton variant="text" width={280} />}
+        breadcrumbs={[{ label: 'Products', to: '/products' }, { label: 'Edit' }]}
+        action={<Skeleton variant="rounded" width={72} height={36} />}
+      />
+
+      <Card>
+        <Box sx={{ px: { xs: 2, sm: 3 }, pt: 3 }}>
+          <Stack direction="row" spacing={2}>
+            {STEPS.map((item) => (
+              <Stack key={item.label} spacing={1} alignItems="center" sx={{ flex: 1 }}>
+                <Skeleton variant="circular" width={24} height={24} />
+                <Skeleton variant="text" width="70%" height={18} />
+              </Stack>
+            ))}
+          </Stack>
+        </Box>
+
+        <Divider sx={{ mt: 3 }} />
+
+        <CardContent sx={{ p: { xs: 2, sm: 3 } }}>
+          <Stack spacing={3}>
+            {/* A label over its input, five times — the shape every step opens with;
+                the third is the tall one, standing in for a description box. */}
+            {Array.from({ length: 5 }).map((_, index) => (
+              <Box key={index}>
+                <Skeleton variant="text" width={140} height={18} />
+                <Skeleton variant="rounded" height={index === 2 ? 96 : 40} sx={{ mt: 1 }} />
+              </Box>
+            ))}
+          </Stack>
+        </CardContent>
+
+        <Divider />
+
+        <Stack
+          direction="row"
+          justifyContent="space-between"
+          sx={{ p: { xs: 2, sm: 2.5 }, bgcolor: 'grey.50' }}
+        >
+          <Skeleton variant="rounded" width={88} height={38} />
+          <Skeleton variant="rounded" width={150} height={42} />
+        </Stack>
+      </Card>
+    </Box>
+  );
 }
 
 export default function ProductForm() {
@@ -299,7 +359,7 @@ export default function ProductForm() {
     }
   };
 
-  if (isEdit && productQuery.loading) return <LinearProgress sx={{ mb: 2 }} />;
+  if (isEdit && productQuery.loading) return <ProductFormSkeleton />;
   if (isEdit && productQuery.error) {
     return (
       <Card>
@@ -318,7 +378,7 @@ export default function ProductForm() {
   return (
     <Box>
       <PageHeader
-        title={isEdit ? 'Edit Product' : 'Upload New Product'}
+        title={isEdit ? 'Edit Product' : 'Add Product'}
         subtitle={STEPS[step].hint}
         breadcrumbs={[{ label: 'Products', to: '/products' }, { label: isEdit ? 'Edit' : 'New' }]}
         action={
@@ -391,7 +451,7 @@ export default function ProductForm() {
                 size="large"
                 disabled={saving || outstandingIssues.length > 0}
                 onClick={submit}
-                startIcon={saving ? <CircularProgress size={16} color="inherit" /> : <SaveIcon />}
+                startIcon={saving ? <CircularProgress size={15} color="inherit" /> : <SaveIcon />}
               >
                 {isEdit
                   ? 'Save changes'

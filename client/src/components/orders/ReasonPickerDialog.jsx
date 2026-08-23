@@ -105,8 +105,6 @@ export default function ReasonPickerDialog({
       open={open}
       onClose={working ? () => {} : onClose}
       title={copy.title}
-      // Slides up from the bottom edge on phones, like the product image viewer.
-      sheet
       footer={
         <>
           <button type="button" onClick={onClose} disabled={working} className="btn-outline">

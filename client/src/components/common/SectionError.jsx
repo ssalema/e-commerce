@@ -12,12 +12,16 @@ import Icon from './Icon';
  *
  * So this keeps a failed band roughly the height it would have occupied, says which
  * band it was, and offers the same retry. Same tokens, quieter voice.
+ *
+ * `gutter` is the page-width padding the home page's bands need. A band that is
+ * already inside a card carries its own padding, so it turns this off rather
+ * than inheriting a second gutter it did not ask for.
  */
-export default function SectionError({ title, message, onRetry, className = '' }) {
+export default function SectionError({ title, message, onRetry, gutter = true, className = '' }) {
   const { t } = useTranslation();
 
   return (
-    <div className={`container-page ${className}`}>
+    <div className={`${gutter ? 'container-page' : ''} ${className}`}>
       <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed border-ink-200 bg-white px-5 py-6 text-center sm:flex-row sm:justify-between sm:gap-6 sm:text-left">
         <div className="flex items-center gap-3">
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-red-50 text-danger">
@@ -30,7 +34,7 @@ export default function SectionError({ title, message, onRetry, className = '' }
         </div>
 
         {onRetry && (
-          <button type="button" onClick={onRetry} className="btn-outline shrink-0 !px-4 !py-2">
+          <button type="button" onClick={onRetry} className="btn-outline btn-sm shrink-0">
             <Icon name="refresh" size={15} />
             {t('actions.retry')}
           </button>

@@ -364,15 +364,42 @@ exports.streamResume = asyncHandler(async (req, res) => {
     throw ApiError.serviceUnavailable('The stored resume could not be retrieved right now');
   }
 
-  const disposition = req.query.disposition === 'attachment' ? 'attachment' : 'inline';
   // Quotes and non-ASCII in an applicant's filename would otherwise break the header.
   const safeName = (fileName || `${application.name}-resume.${format || 'pdf'}`).replace(
     /[^\w.\- ]+/g,
     '_'
   );
 
-  res.setHeader('Content-Type', upstream.headers.get('content-type') || 'application/octet-stream');
+  /**
+   * The content type is decided here, from the stored extension, and never taken
+   * from upstream.
+   *
+   * Echoing the provider's header meant an applicant chose what type staff's
+   * browser would treat their upload as — and a file that came back as text/html
+   * rendered as a page on this API's own origin, which is where the refresh
+   * cookie lives. The upload filter no longer admits such a file, and this is the
+   * second half of that: an extension we do not recognise is a download, not a
+   * document, and only a PDF is ever previewable inline.
+   */
+  const extension = (safeName.match(/\.([a-z0-9]+)$/i)?.[1] || '').toLowerCase();
+  const RESUME_TYPES = {
+    pdf: 'application/pdf',
+    doc: 'application/msword',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  };
+  const contentType = RESUME_TYPES[extension] || 'application/octet-stream';
+
+  // Word documents have no in-browser viewer, and anything unrecognised must not
+  // get one either — inline is offered for the one type that can honour it.
+  const disposition =
+    req.query.disposition !== 'attachment' && extension === 'pdf' ? 'inline' : 'attachment';
+
+  res.setHeader('Content-Type', contentType);
   res.setHeader('Content-Disposition', `${disposition}; filename="${safeName}"`);
+  // Belt and braces for the inline case: nothing this response carries may be
+  // sniffed into another type, execute, or navigate anywhere.
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
   const length = upstream.headers.get('content-length');
   if (length) res.setHeader('Content-Length', length);
 

@@ -25,7 +25,6 @@ export default function PendingOrdersDialog({ open, onClose, orders = [] }) {
       open={open}
       onClose={onClose}
       title={t('settings.pendingOrdersTitle')}
-      sheet
       footer={
         <>
           <button type="button" onClick={onClose} className="btn-outline">

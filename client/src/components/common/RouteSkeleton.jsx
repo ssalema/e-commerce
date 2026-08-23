@@ -6,6 +6,7 @@ import Skeleton, {
 import TranslationSkeleton, {
   AccountPanelSkeleton,
 } from '../language/TranslationSkeleton';
+import { PRODUCT_GRID_COLUMNS } from '../../utils/constants';
 
 /**
  * Suspense fallback for a route chunk that is still downloading.
@@ -52,7 +53,14 @@ function PolicySkeleton() {
 export default function RouteSkeleton({ pathname = '' }) {
   const path = pathname.replace(/\/+$/, '') || '/';
 
-  if (path === '/' || path === '/products' || path === '/wishlist') {
+  // The listing keeps a column for its filter rail, so its placeholder has to as
+  // well — otherwise the chunk-download skeleton shimmers five across and hands
+  // over to a four-across page.
+  if (path === '/products') {
+    return <ProductGridPageSkeleton count={12} columns={PRODUCT_GRID_COLUMNS.withSidebar} />;
+  }
+
+  if (path === '/' || path === '/wishlist') {
     return <ProductGridPageSkeleton />;
   }
 

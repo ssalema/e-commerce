@@ -104,7 +104,7 @@ export default function Dashboard() {
         subtitle="Store performance at a glance"
         action={
           <Button variant="contained" startIcon={<AddIcon />} onClick={() => navigate('/products/new')}>
-            Upload Product
+            Add product
           </Button>
         }
       />

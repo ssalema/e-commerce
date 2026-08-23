@@ -105,7 +105,7 @@ function ProductCard({ product, className = '' }) {
             type="button"
             onClick={() => handleAddToCart(product)}
             disabled={outOfStock}
-            className="btn-primary w-full !py-2 text-xs"
+            className="btn-primary btn-xs w-full"
           >
             <Icon name="cart" size={15} />
             {outOfStock

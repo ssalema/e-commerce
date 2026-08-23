@@ -72,7 +72,7 @@ export default function MobileCategorySheet({ open, onClose }) {
       role="dialog"
       aria-modal="true"
       aria-label={t('nav.shopByCategory')}
-      className="fixed inset-x-0 top-0 z-[60] flex animate-fade-in flex-col bg-white
+      className="fixed inset-x-0 top-0 z-mobile-sheet flex animate-fade-in flex-col bg-white
                  bottom-[calc(4rem+env(safe-area-inset-bottom))] lg:hidden"
     >
       <div className="flex items-center justify-between border-b border-ink-200 bg-ink-900 px-4 py-3 text-white">

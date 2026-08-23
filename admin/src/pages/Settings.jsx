@@ -12,7 +12,7 @@ import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Chip from '@mui/material/Chip';
-import LinearProgress from '@mui/material/LinearProgress';
+import Skeleton from '@mui/material/Skeleton';
 import CircularProgress from '@mui/material/CircularProgress';
 import InputAdornment from '@mui/material/InputAdornment';
 
@@ -74,6 +74,14 @@ function toForm(settings) {
   };
 }
 
+/**
+ * Named once because the page renders its header three times — skeleton, error and
+ * the form itself — and the three have to be the same height or the header jumps
+ * as the fetch resolves.
+ */
+const SETTINGS_SUBTITLE =
+  'Store identity, contact details, delivery and return rules, branding and search engine metadata — everything the storefront reads from here';
+
 const SECTION_LABEL = {
   general: 'General information',
   commerce: 'Commerce rules',
@@ -83,6 +91,69 @@ const SECTION_LABEL = {
 };
 
 /** Card shell shared by every section: title, per-section reset, consistent padding. */
+/** A section card's outline: its heading, the divider, and `fields` inputs under it. */
+function SectionSkeleton({ fields, columns = 1 }) {
+  return (
+    <Card sx={{ height: '100%' }}>
+      <CardContent sx={{ p: { xs: 2, sm: 2.5 } }}>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+          <Skeleton variant="text" width={170} height={28} />
+          <Skeleton variant="circular" width={28} height={28} />
+        </Stack>
+
+        <Divider sx={{ mt: 1.5, mb: 2.5 }} />
+
+        <Grid container spacing={2.5}>
+          {Array.from({ length: fields }).map((_, index) => (
+            <Grid key={index} size={columns === 1 ? 12 : { xs: 12, md: 6, lg: 4 }}>
+              <Skeleton variant="text" width={120} height={18} />
+              <Skeleton variant="rounded" height={40} sx={{ mt: 1 }} />
+            </Grid>
+          ))}
+        </Grid>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * The whole settings page while its one document is being read.
+ *
+ * The form used to render straight away over an empty draft, with a progress bar on
+ * top: every field showed as blank and then filled itself in, which reads as "there
+ * is nothing saved here" for as long as the fetch takes. Drawing the sections instead
+ * says the values are still coming, and none of them can be typed over mid-flight.
+ */
+function SettingsSkeleton() {
+  return (
+    <Box sx={{ pb: 10 }}>
+      <PageHeader
+        title="Organization"
+        subtitle={SETTINGS_SUBTITLE}
+        breadcrumbs={[{ label: 'Organization' }]}
+      />
+
+      <Grid container spacing={2.5} alignItems="stretch">
+        <Grid size={{ xs: 12, lg: 5 }}>
+          <SectionSkeleton fields={5} />
+        </Grid>
+        <Grid size={{ xs: 12, lg: 4 }}>
+          <SectionSkeleton fields={3} />
+        </Grid>
+        <Grid size={{ xs: 12, lg: 3 }}>
+          <SectionSkeleton fields={2} />
+        </Grid>
+        <Grid size={12}>
+          <SectionSkeleton fields={3} columns={3} />
+        </Grid>
+        <Grid size={12}>
+          <SectionSkeleton fields={5} columns={3} />
+        </Grid>
+      </Grid>
+    </Box>
+  );
+}
+
 function SectionCard({ title, section, onReset, dirty, children }) {
   return (
     <Card sx={{ height: '100%' }}>
@@ -236,12 +307,25 @@ export default function Settings() {
 
   const fieldProps = { values, errors, history, onChange: set };
 
+  if (query.loading) return <SettingsSkeleton />;
   if (query.error) {
     return (
       <Box>
-        <PageHeader title="Organization" breadcrumbs={[{ label: 'Organization' }]} />
+        {/* The subtitle stays even though there is nothing to configure yet: the
+            skeleton and the loaded page both carry one, and dropping it here is
+            the difference between a header that holds still and one that shrinks
+            the moment a fetch fails. */}
+        <PageHeader
+          title="Organization"
+          subtitle={SETTINGS_SUBTITLE}
+          breadcrumbs={[{ label: 'Organization' }]}
+        />
         <Card>
-          <ErrorState message={query.error.message} onRetry={query.refetch} />
+          <ErrorState
+            title="Could not load the settings"
+            message={query.error.message}
+            onRetry={query.refetch}
+          />
         </Card>
       </Box>
     );
@@ -251,14 +335,12 @@ export default function Settings() {
     <Box sx={{ pb: 10 }}>
       <PageHeader
         title="Organization"
-        subtitle="Store identity, contact details, delivery and return rules, branding and search engine metadata — everything the storefront reads from here"
+        subtitle={SETTINGS_SUBTITLE}
         breadcrumbs={[{ label: 'Organization' }]}
         action={
           isDirty ? <Chip label={`${dirtySections.length} section(s) edited`} color="warning" /> : null
         }
       />
-
-      {query.loading && <LinearProgress sx={{ mb: 2 }} />}
 
       <Grid container spacing={2.5} alignItems="stretch">
         {/* ---------- General information ---------- */}
@@ -509,11 +591,11 @@ export default function Settings() {
             </Button>
             <Button
               variant="contained"
-              disabled={!isDirty || saving || query.loading}
+              disabled={!isDirty || saving}
               onClick={save}
               startIcon={saving ? <CircularProgress size={15} color="inherit" /> : <SaveIcon />}
             >
-              Save Changes
+              Save changes
             </Button>
           </Stack>
         </Stack>

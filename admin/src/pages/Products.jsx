@@ -296,7 +296,7 @@ export default function Products() {
         breadcrumbs={[{ label: 'Products' }]}
         action={
           <Button variant="contained" startIcon={<AddIcon />} onClick={() => navigate('/products/new')}>
-            Upload Product
+            Add product
           </Button>
         }
       />
@@ -307,6 +307,7 @@ export default function Products() {
         loading={query.loading}
         error={query.error}
         onRetry={query.refetch}
+        errorTitle="Could not load the products"
         page={page}
         limit={limit}
         total={meta?.total || 0}
@@ -319,14 +320,14 @@ export default function Products() {
         emptyMessage={
           isFiltered
             ? 'Try a different search term, or widen the category, status or stock filter.'
-            : 'Upload your first product to get started.'
+            : 'Add your first product to get started.'
         }
-        // Offering "Upload Product" under a filtered miss answers a question nobody
+        // Offering "Add product" under a filtered miss answers a question nobody
         // asked — the way back is the filters, and the reset button is right above.
         emptyAction={
           isFiltered
             ? { label: 'Reset filters', onClick: resetFilters }
-            : { label: 'Upload Product', onClick: () => navigate('/products/new') }
+            : { label: 'Add product', onClick: () => navigate('/products/new') }
         }
         toolbar={
           <Stack

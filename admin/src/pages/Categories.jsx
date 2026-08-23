@@ -8,7 +8,6 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
-import Chip from '@mui/material/Chip';
 import Divider from '@mui/material/Divider';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
@@ -19,7 +18,6 @@ import MenuItem from '@mui/material/MenuItem';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Switch from '@mui/material/Switch';
 import CircularProgress from '@mui/material/CircularProgress';
-import LinearProgress from '@mui/material/LinearProgress';
 import Tooltip from '@mui/material/Tooltip';
 
 import AddIcon from '@mui/icons-material/Add';
@@ -35,8 +33,10 @@ import { TAXONOMY_EVENTS } from '../realtime/events';
 import PageHeader from '../components/common/PageHeader';
 import EmptyState from '../components/common/EmptyState';
 import ErrorState from '../components/common/ErrorState';
+import StatusChip from '../components/common/StatusChip';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import ImageUploader from '../components/products/ImageUploader';
+import CardGridSkeleton from '../components/common/CardGridSkeleton';
 
 const EMPTY_IMAGE = { url: '', publicId: '' };
 const EMPTY_CATEGORY = { name: '', description: '', image: EMPTY_IMAGE, displayOrder: 0, isActive: true };
@@ -303,7 +303,7 @@ function CategoryDialog({ open, initial, categories, mode, onClose, onSaved }) {
           disabled={saving}
           startIcon={saving ? <CircularProgress size={15} color="inherit" /> : null}
         >
-          Save
+          Save {isSub ? 'sub-category' : 'category'}
         </Button>
       </DialogActions>
     </Dialog>
@@ -348,25 +348,31 @@ export default function Categories() {
               disabled={categories.length === 0}
               onClick={() => setDialog({ mode: 'sub', initial: null })}
             >
-              Sub-category
+              Add sub-category
             </Button>
             <Button
               variant="contained"
               startIcon={<AddIcon />}
               onClick={() => setDialog({ mode: 'category', initial: null })}
             >
-              Add Category
+              Add category
             </Button>
           </Stack>
         }
       />
 
-      {query.loading && <LinearProgress sx={{ mb: 2 }} />}
-
       {/* A failed load has to say so: falling through to the empty state below would
           tell the reader the tree is empty when it only could not be read — and its
           call to action would invite them to rebuild a taxonomy that already exists. */}
-      {!query.loading && query.error ? (
+      {query.loading ? (
+        <CardGridSkeleton
+          count={6}
+          size={{ xs: 12, md: 6, xl: 4 }}
+          minHeight={CARD_HEIGHT}
+          thumbSize={44}
+          listRows={VISIBLE_SUB_ROWS}
+        />
+      ) : query.error ? (
         <Card>
           <ErrorState
             title="Could not load the categories"
@@ -374,12 +380,12 @@ export default function Categories() {
             onRetry={query.refetch}
           />
         </Card>
-      ) : !query.loading && categories.length === 0 ? (
+      ) : categories.length === 0 ? (
         <Card>
           <EmptyState
             title="No categories yet"
             message="Create your first category — products cannot be published without one."
-            actionLabel="Add Category"
+            actionLabel="Add category"
             onAction={() => setDialog({ mode: 'category', initial: null })}
           />
         </Card>
@@ -407,7 +413,7 @@ export default function Categories() {
                           <Typography variant="h6" noWrap>
                             {category.name}
                           </Typography>
-                          {!category.isActive && <Chip label="Hidden" size="small" color="warning" />}
+                          {!category.isActive && <StatusChip status="inactive" kind="availability" />}
                         </Stack>
                         <Typography variant="caption" color="text.secondary">
                           /{category.slug} ·{' '}
@@ -541,7 +547,7 @@ export default function Categories() {
                             <Typography variant="body2" noWrap>
                               {sub.name}
                             </Typography>
-                            {!sub.isActive && <Chip label="Hidden" size="small" color="warning" />}
+                            {!sub.isActive && <StatusChip status="inactive" kind="availability" />}
                           </Stack>
 
                           <Stack direction="row" spacing={0.25}>

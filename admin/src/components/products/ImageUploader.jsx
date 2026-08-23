@@ -172,7 +172,7 @@ export default function ImageUploader({
     const target = value[index];
     if (destroyOnRemove && target?.publicId) uploadApi.remove(target.publicId).catch(() => {});
     onChange(normalise(value.filter((_, i) => i !== index)));
-    enqueueSnackbar('Image removed', { variant: 'info' });
+    enqueueSnackbar('Image removed', { variant: 'success' });
   };
 
   const move = (index, direction) => {

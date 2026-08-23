@@ -214,7 +214,7 @@ export default function ProductReviews({ product }) {
               setSort(e.target.value);
               setPage(1);
             }}
-            className="input !w-auto !py-2 text-sm"
+            className="input input-sm input-auto"
             aria-label={t('reviews.sortAria')}
           >
             <option value="newest">{t('reviews.sort.newest')}</option>
@@ -229,7 +229,7 @@ export default function ProductReviews({ product }) {
               setRatingFilter(e.target.value);
               setPage(1);
             }}
-            className="input !w-auto !py-2 text-sm"
+            className="input input-sm input-auto"
             aria-label={t('reviews.filterAria')}
           >
             <option value="">{t('reviews.allRatings')}</option>

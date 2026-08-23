@@ -34,7 +34,7 @@ class ErrorBoundary extends Component {
         <div className="mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-red-50 text-danger">
           <Icon name="alert" size={36} />
         </div>
-        <h1 className="mb-2 text-xl font-bold text-ink-900">{t('errors.boundaryTitle')}</h1>
+        <h1 className="mb-2 display-title">{t('errors.boundaryTitle')}</h1>
         <p className="mb-6 max-w-md text-sm text-ink-500">{t('errors.boundaryMessage')}</p>
         <div className="flex flex-wrap justify-center gap-3">
           <button type="button" onClick={this.reset} className="btn-primary">

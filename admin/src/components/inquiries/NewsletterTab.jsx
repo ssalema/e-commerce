@@ -79,6 +79,14 @@ export default function NewsletterTab() {
     filters.sort !== DEFAULT_FILTERS.sort ||
     !range.isDefault;
 
+  // Named rather than inlined on the button: the filtered-empty state offers the
+  // same reset, so a miss caused by the filters carries its own way out.
+  const resetFilters = () => {
+    setFilters(DEFAULT_FILTERS);
+    range.reset();
+    setPage(1);
+  };
+
   /** Narrowing the window can drop the page the reader is on, so start over. */
   const selectRange = (key, custom) => {
     range.select(key, custom);
@@ -223,14 +231,7 @@ export default function NewsletterTab() {
         ))}
       </TextField>
 
-      <ResetFiltersButton
-        disabled={!isFiltered}
-        onClick={() => {
-          setFilters(DEFAULT_FILTERS);
-          range.reset();
-          setPage(1);
-        }}
-      />
+      <ResetFiltersButton disabled={!isFiltered} onClick={resetFilters} />
     </Stack>
   );
 
@@ -242,6 +243,7 @@ export default function NewsletterTab() {
         loading={query.loading}
         error={query.error}
         onRetry={query.refetch}
+        errorTitle="Could not load the subscribers"
         page={page}
         limit={limit}
         total={meta?.total || 0}
@@ -257,6 +259,7 @@ export default function NewsletterTab() {
             ? 'Try a different search term, or widen the date or status filter.'
             : 'Sign-ups from the storefront footer land here.'
         }
+        emptyAction={isFiltered ? { label: 'Reset filters', onClick: resetFilters } : undefined}
       />
 
       <ConfirmDialog

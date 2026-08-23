@@ -141,7 +141,7 @@ export default function Settings() {
     <div className="space-y-5">
       <Seo title={t('settings.title')} noIndex />
 
-      <h1 className="text-xl font-bold text-ink-900">{t('settings.title')}</h1>
+      <h1 className="panel-title">{t('settings.title')}</h1>
 
       <section className="card p-5">
         <h2 className="mb-1 text-base font-bold text-ink-900">

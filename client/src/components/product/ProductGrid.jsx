@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import ProductCard from './ProductCard';
 import { ProductGridSkeleton } from '../common/Skeleton';
+import { PRODUCT_GRID_COLUMNS } from '../../utils/constants';
 import EmptyState from '../common/EmptyState';
 
 export default function ProductGrid({
@@ -10,11 +11,11 @@ export default function ProductGrid({
   emptyTitle,
   emptyMessage,
   emptyAction,
-  columns = 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5',
+  columns = PRODUCT_GRID_COLUMNS.full,
 }) {
   const { t } = useTranslation('shop');
 
-  if (loading) return <ProductGridSkeleton count={skeletonCount} />;
+  if (loading) return <ProductGridSkeleton count={skeletonCount} columns={columns} />;
 
   if (!products.length) {
     return (

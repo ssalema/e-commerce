@@ -166,8 +166,44 @@ function privateDownloadUrl(publicId, { expiresInSeconds = 300 } = {}) {
   });
 }
 
+/** This store's folder, or one namespace inside it. */
+const assetFolder = (sub) => (sub ? `${env.cloudinary.folder}/${sub}` : env.cloudinary.folder);
+
+/**
+ * Is this public id ours — and, when `sub` is given, ours *in that namespace*?
+ *
+ * The prefix is matched with its separator attached, never as a bare
+ * `startsWith`: the folder "premium-ecommerce" would otherwise also match
+ * "premium-ecommerce-anything/…", which is a different folder entirely.
+ *
+ * The `sub` argument is what makes this useful for ids a shopper supplies.
+ * "Somewhere in this store" is far too wide a permission to hand a review — the
+ * product photos live in this store too, and naming one is how a review became a
+ * way to delete the catalogue. Callers handling client input pass the namespace
+ * that input is entitled to and get a much smaller answer.
+ */
+function isOwnedAsset(publicId, sub) {
+  const folder = assetFolder(sub);
+  return typeof publicId === 'string' && (publicId === folder || publicId.startsWith(`${folder}/`));
+}
+
+/**
+ * Deletes an asset, and refuses any id outside this store's own folder.
+ *
+ * The guard lives here rather than in the callers because a public id is not
+ * always something staff chose: a review carries the ids of its attachments, and
+ * those arrive from the browser. One unvalidated field anywhere upstream would
+ * otherwise be enough to aim `destroy` at the product catalogue. Callers may
+ * still narrow further; none of them can widen past this.
+ */
 async function destroyAsset(publicId, { resourceType = 'image' } = {}) {
   if (!publicId || !env.cloudinaryEnabled) return null;
+
+  if (!isOwnedAsset(publicId)) {
+    logger.warn(`Refused Cloudinary destroy for "${publicId}" — outside ${env.cloudinary.folder}/`);
+    return null;
+  }
+
   try {
     return await cloudinary.uploader.destroy(publicId, { resource_type: resourceType });
   } catch (err) {
@@ -185,5 +221,7 @@ module.exports = {
   signUpload,
   videoPosterUrl,
   destroyAsset,
+  isOwnedAsset,
+  assetFolder,
   privateDownloadUrl,
 };

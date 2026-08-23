@@ -34,6 +34,7 @@ const COPY = {
         already been cancelled keeps the reason it was given.
       </>
     ),
+    errorTitle: 'Could not load the cancellation reasons',
     emptyTitle: 'No cancellation reasons',
     emptyMessage: "Add a reason and it will appear in the storefront's cancel dialog.",
     deleteMessage: (label) =>
@@ -53,6 +54,7 @@ const COPY = {
         reason it was given.
       </>
     ),
+    errorTitle: 'Could not load the return reasons',
     emptyTitle: 'No return reasons',
     emptyMessage: "Add a reason and it will appear in the storefront's return dialog.",
     deleteMessage: (label) =>
@@ -70,6 +72,7 @@ const COPY = {
         — an account already closed keeps the reason it was given.
       </>
     ),
+    errorTitle: 'Could not load the deactivation reasons',
     emptyTitle: 'No deactivation reasons',
     emptyMessage: 'Add a reason and it will appear in the account deactivation dialog.',
     deleteMessage: (label) =>
@@ -89,7 +92,7 @@ export default function Reasons() {
     <Box>
       <PageHeader
         title="Reasons"
-        subtitle="The picklists customers choose from when cancelling an order, returning one, or deactivating their account."
+        subtitle="The picklists customers choose from when cancelling an order, returning one, or deactivating their account"
         breadcrumbs={[{ label: 'Reasons' }]}
       />
 

@@ -203,7 +203,7 @@ export default function CareerSetupDialog({ positions, experienceLevels, hr, onC
               variant="outlined"
               onClick={saveContact}
               disabled={savingContact || !contactChanged}
-              startIcon={savingContact ? <CircularProgress size={14} color="inherit" /> : <SaveIcon />}
+              startIcon={savingContact ? <CircularProgress size={15} color="inherit" /> : <SaveIcon />}
             >
               Update
             </Button>
@@ -265,7 +265,7 @@ export default function CareerSetupDialog({ positions, experienceLevels, hr, onC
               variant="contained"
               onClick={addPosition}
               disabled={adding}
-              startIcon={adding ? <CircularProgress size={14} color="inherit" /> : <AddIcon />}
+              startIcon={adding ? <CircularProgress size={15} color="inherit" /> : <AddIcon />}
             >
               Add
             </Button>
@@ -345,7 +345,7 @@ export default function CareerSetupDialog({ positions, experienceLevels, hr, onC
               variant="contained"
               onClick={addLevel}
               disabled={addingLevel}
-              startIcon={addingLevel ? <CircularProgress size={14} color="inherit" /> : <AddIcon />}
+              startIcon={addingLevel ? <CircularProgress size={15} color="inherit" /> : <AddIcon />}
             >
               Add
             </Button>

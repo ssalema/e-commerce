@@ -36,6 +36,22 @@ const env = {
    */
   clientDistPath: process.env.CLIENT_DIST_PATH || '',
 
+  /**
+   * How many proxies sit in front of this process.
+   *
+   * Express counts back this many hops through X-Forwarded-For to decide `req.ip`,
+   * and `req.ip` is what every per-IP rate limiter buckets on. The number has to
+   * match the deployment exactly: too high and a client can prepend its own
+   * addresses to the header and rotate `req.ip` per request, which walks straight
+   * past the login limiter; too low and every visitor shares the proxy's address
+   * in one bucket, so one busy user 429s everybody.
+   *
+   * 1 is right behind a single nginx/Render/Heroku router. Behind a CDN *and* a
+   * load balancer it is 2. Exposed directly to the internet it must be 0, which
+   * makes Express ignore the header altogether.
+   */
+  trustProxy: num(process.env.TRUST_PROXY_HOPS, 1),
+
   mongoUri: process.env.MONGO_URI,
 
   jwt: {

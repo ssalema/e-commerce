@@ -140,7 +140,7 @@ export default function FilterSidebar({ filters, onChange, onReset, meta, classN
             min={bounds.min}
             onChange={(e) => setPriceDraft((p) => ({ ...p, min: e.target.value }))}
             placeholder={String(bounds.min)}
-            className="input !py-1.5 text-sm"
+            className="input input-sm"
             aria-label={t('filters.minPrice')}
           />
           <span className="text-ink-400">–</span>
@@ -150,11 +150,11 @@ export default function FilterSidebar({ filters, onChange, onReset, meta, classN
             max={bounds.max}
             onChange={(e) => setPriceDraft((p) => ({ ...p, max: e.target.value }))}
             placeholder={String(bounds.max)}
-            className="input !py-1.5 text-sm"
+            className="input input-sm"
             aria-label={t('filters.maxPrice')}
           />
         </div>
-        <button type="button" onClick={applyPrice} className="btn-outline w-full !py-1.5 text-xs">
+        <button type="button" onClick={applyPrice} className="btn-outline btn-xs w-full">
           {t('filters.applyPrice')}
         </button>
         <p className="pt-1 text-[11px] text-ink-400">

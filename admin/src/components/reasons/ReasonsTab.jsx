@@ -7,7 +7,6 @@ import Alert from '@mui/material/Alert';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
-import Chip from '@mui/material/Chip';
 import Tooltip from '@mui/material/Tooltip';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
@@ -26,6 +25,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import useFetch from '../../hooks/useFetch';
 import { useLiveRefetch } from '../../realtime/useRealtime';
 import DataTable from '../common/DataTable';
+import StatusChip from '../common/StatusChip';
 import ConfirmDialog from '../common/ConfirmDialog';
 
 /**
@@ -72,7 +72,7 @@ function ReasonDialog({ initial, nextOrder, api, copy, onClose, onSaved }) {
       if (values._id) await api.update(values._id, payload);
       else await api.create(payload);
 
-      enqueueSnackbar(values._id ? 'Reason updated' : 'Reason added', { variant: 'success' });
+      enqueueSnackbar(values._id ? 'Reason updated' : 'Reason created', { variant: 'success' });
       onSaved();
     } catch (err) {
       enqueueSnackbar(err.message || 'Could not save the reason', { variant: 'error' });
@@ -229,15 +229,16 @@ export default function ReasonsTab({ api, event, copy }) {
       label: 'Status',
       align: 'center',
       width: 120,
+      // The chip takes the click itself rather than sitting inside a clickable
+      // span: a Chip with `onClick` is focusable and answers Enter and Space,
+      // which a wrapped span never did.
       render: (row) => (
-        <Tooltip title="Click to toggle active / inactive">
-          <Box component="span" onClick={() => toggleActive(row)} sx={{ cursor: 'pointer' }}>
-            <Chip
-              label={row.isActive ? 'Active' : 'Inactive'}
-              size="small"
-              color={row.isActive ? 'success' : 'default'}
-            />
-          </Box>
+        <Tooltip title="Toggle active / inactive">
+          <StatusChip
+            status={row.isActive ? 'active' : 'inactive'}
+            kind="availability"
+            onClick={() => toggleActive(row)}
+          />
         </Tooltip>
       ),
     },
@@ -276,7 +277,7 @@ export default function ReasonsTab({ api, event, copy }) {
           {reasons.length} reason(s) configured
         </Typography>
         <Button variant="contained" startIcon={<AddIcon />} onClick={() => setDialog({})}>
-          Add Reason
+          Add reason
         </Button>
       </Stack>
 
@@ -290,9 +291,10 @@ export default function ReasonsTab({ api, event, copy }) {
         loading={query.loading}
         error={query.error}
         onRetry={query.refetch}
+        errorTitle={copy.errorTitle}
         emptyTitle={copy.emptyTitle}
         emptyMessage={copy.emptyMessage}
-        emptyAction={{ label: 'Add Reason', onClick: () => setDialog({}) }}
+        emptyAction={{ label: 'Add reason', onClick: () => setDialog({}) }}
       />
 
       {dialog && (

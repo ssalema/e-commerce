@@ -19,12 +19,18 @@ const FOCUSABLE =
   ' textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
- * `sheet` opts a dialog into the bottom-sheet treatment on handheld widths: it
- * slides up from the bottom edge and slides back down on close instead of
- * appearing in place. It is opt-in so existing dialogs are untouched — only the
- * cancellation-reason dialog asks for it today.
+ * `sheet` is the bottom-sheet treatment on handheld widths: the panel slides up
+ * from the bottom edge and slides back down on close, instead of appearing in
+ * place.
+ *
+ * It defaults on, because the layout below already commits to it — every dialog
+ * is pinned to the bottom edge and rounded on its top corners alone under 640px,
+ * whatever this flag says. Leaving the *motion* opt-in meant half the app's
+ * dialogs slid up and half materialised inside the same shape, which reads as
+ * two different components rather than one. A caller can still pass
+ * `sheet={false}` for a dialog that genuinely wants to appear in place.
  */
-export default function Modal({ open, onClose, title, children, footer, size = 'md', sheet = false }) {
+export default function Modal({ open, onClose, title, children, footer, size = 'md', sheet = true }) {
   const { t } = useTranslation();
   const isWide = useMediaQuery(WIDE);
   const asSheet = sheet && !isWide;
@@ -143,7 +149,7 @@ export default function Modal({ open, onClose, title, children, footer, size = '
   return createPortal(
     <div
       ref={overlayRef}
-      className="fixed inset-0 z-[100] flex items-end justify-center sm:items-center"
+      className="fixed inset-0 z-dialog flex items-end justify-center sm:items-center"
     >
       <div
         className={`absolute inset-0 bg-ink-900/50 ${asSheet ? '' : 'animate-fade-in'}`}

@@ -84,7 +84,16 @@ exports.verifyPayment = asyncHandler(async (req, res) => {
     throw ApiError.badRequest('Payment verification failed. If money was debited it will be refunded.');
   }
 
-  // Confirm the amount with Razorpay directly rather than believing the client.
+  /**
+   * Confirm the amount with Razorpay directly rather than believing the client.
+   *
+   * A failed lookup is not a pass. The signature covers the order and payment ids
+   * and nothing else — it says this pair is genuine, never that the right sum was
+   * captured — so skipping the amount check when the fetch happened to fail was
+   * the difference between "verified" and "signed". The order simply stays
+   * pending: the webhook is the other half of this flow and settles it from
+   * Razorpay's own account of what was captured, with no client in the middle.
+   */
   let providerPayment = null;
   try {
     providerPayment = await razorpay.fetchPayment(razorpayPaymentId);
@@ -92,7 +101,14 @@ exports.verifyPayment = asyncHandler(async (req, res) => {
     logger.warn(`Could not fetch Razorpay payment ${razorpayPaymentId}: ${err.message}`);
   }
 
-  if (providerPayment && providerPayment.amount !== razorpay.toPaise(order.pricing.total)) {
+  if (!providerPayment) {
+    throw ApiError.serviceUnavailable(
+      'We could not confirm this payment with the provider just now. If money was debited, ' +
+        'your order will be updated automatically within a few minutes.'
+    );
+  }
+
+  if (providerPayment.amount !== razorpay.toPaise(order.pricing.total)) {
     payment.status = 'failed';
     payment.errorDescription = 'Amount mismatch';
     await payment.save();
@@ -193,23 +209,64 @@ exports.webhook = asyncHandler(async (req, res) => {
       payment.method = entity.method;
       await payment.save();
 
-      // Idempotent: the verify endpoint may already have promoted this order.
-      const promoted = await Order.updateOne(
-        { _id: payment.order, paymentStatus: { $ne: 'paid' } },
-        { paymentStatus: 'paid', orderStatus: 'confirmed' }
+      /**
+       * Idempotent: the verify endpoint may already have promoted this order.
+       *
+       * A cancelled order is explicitly not promoted. Cancelling already put the
+       * stock back and handed the coupon redemption back, so forcing it to
+       * `confirmed` here revived an order nothing was reserved for — and money
+       * that lands on a cancelled order is a refund to raise, not a sale to
+       * resurrect. It is left cancelled, marked `refund_pending`, and the
+       * mismatch is logged for staff to settle through the gateway.
+       *
+       * `orderStatus` is set through a pipeline so only an order still waiting on
+       * payment moves to `confirmed`; one staff have already packed or shipped
+       * keeps the status it has.
+       */
+      const settled = ['cancelled', 'returned'].includes(
+        (await Order.findById(payment.order).select('orderStatus').lean())?.orderStatus
       );
+
+      if (settled) {
+        await Order.updateOne(
+          { _id: payment.order, paymentStatus: { $ne: 'refunded' } },
+          { paymentStatus: 'refund_pending' }
+        );
+        logger.warn(
+          `Razorpay captured ${entity.id} for order ${payment.order}, which is already ` +
+            `cancelled or returned — flagged for refund rather than confirmed.`
+        );
+      }
+
+      const promoted = settled
+        ? { modifiedCount: 0 }
+        : await Order.updateOne({ _id: payment.order, paymentStatus: { $ne: 'paid' } }, [
+            {
+              $set: {
+                paymentStatus: 'paid',
+                orderStatus: {
+                  $cond: [{ $eq: ['$orderStatus', 'pending'] }, 'confirmed', '$orderStatus'],
+                },
+              },
+            },
+          ]);
 
       // The webhook is the safety net for a shopper who closed the tab before
       // /payments/verify ran, so it redeems too. redeemForOrder is idempotent per
-      // order, so whichever of the two arrives second consumes nothing.
+      // order, so whichever of the two arrives second consumes nothing. A
+      // cancelled order is skipped: cancelling gave the redemption back, and
+      // claiming it again here would spend a use on an order nobody is getting.
       const order = await Order.findById(payment.order);
-      if (order) await redeemForOrder(order);
+      if (order && !settled) await redeemForOrder(order);
 
       // Only announce when this webhook is the one that moved the order — otherwise
       // /payments/verify already told everyone.
       if (promoted.modifiedCount > 0 && order) {
         broadcast.paymentUpdated(order, payment);
         broadcast.orderStatusChanged(order, 'Payment confirmed by provider');
+      } else if (settled && order) {
+        // Staff need to see the money that landed on a cancelled order.
+        broadcast.paymentUpdated(order, payment);
       }
     }
   }
@@ -232,6 +289,18 @@ exports.refund = asyncHandler(async (req, res) => {
   const payment = await Payment.findById(req.params.id);
   if (!payment) throw ApiError.notFound('Payment not found');
   if (payment.status !== 'captured') throw ApiError.badRequest('Only captured payments can be refunded');
+
+  /**
+   * A partial refund may never exceed what was captured. The gateway would refuse
+   * it anyway, but refusing here means the ceiling is this system's own rule
+   * rather than a remote error message staff have to interpret — and a mistyped
+   * figure is caught before it reaches the money.
+   */
+  if (req.body.amount != null && req.body.amount > payment.amount) {
+    throw ApiError.badRequest(
+      `Refund cannot exceed the captured amount of ${payment.amount}`
+    );
+  }
 
   const refund = await razorpay.refundPayment({
     paymentId: payment.razorpayPaymentId,

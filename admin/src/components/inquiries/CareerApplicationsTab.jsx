@@ -480,6 +480,7 @@ export default function CareerApplicationsTab({ onCountsChanged, setupOpen, onSe
         loading={query.loading}
         error={query.error}
         onRetry={query.refetch}
+        errorTitle="Could not load the applications"
         page={page}
         limit={limit}
         total={meta?.total || 0}

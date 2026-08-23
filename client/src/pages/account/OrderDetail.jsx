@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
@@ -24,7 +24,8 @@ import ConfirmDialog from '../../components/common/ConfirmDialog';
 import Modal from '../../components/common/Modal';
 import CancelReasonDialog from '../../components/orders/CancelReasonDialog';
 import ReturnReasonDialog from '../../components/orders/ReturnReasonDialog';
-import ReturnTracker from '../../components/orders/ReturnTracker';
+import ReturnTracker, { ReturnStatusBadge } from '../../components/orders/ReturnTracker';
+import Timeline from '../../components/orders/Timeline';
 import ErrorState from '../../components/common/ErrorState';
 import { ListRowSkeleton } from '../../components/common/Skeleton';
 
@@ -88,88 +89,27 @@ function timelineRows(order) {
 }
 
 function StatusTimeline({ order, t }) {
-  const rows = timelineRows(order);
+  const rows = timelineRows(order).map((row) => ({
+    ...row,
+    label: t(row.label),
+    ...(row.closing && {
+      panel: {
+        title:
+          row.by === 'customer'
+            ? t('detail.cancelledByYou')
+            : row.by === 'admin'
+              ? t('detail.cancelledByStore')
+              : t('detail.cancelledTitle'),
+        // An admin-authored reason, or the shopper's own words, shown as
+        // written; only our fallback sentence is translated.
+        text: t('detail.cancelledReason', {
+          reason: row.reason || t('detail.cancelledDefault'),
+        }),
+      },
+    }),
+  }));
 
-  return (
-    <ol className="relative">
-      {rows.map((row, index) => {
-        const last = index === rows.length - 1;
-        const closing = Boolean(row.closing);
-
-        return (
-          <li key={row.key} className="relative flex gap-4 pb-6 last:pb-0">
-            {!last && (
-              <span
-                className={`absolute left-[13px] top-7 h-full w-0.5 ${
-                  // The segment takes the colour of the step it runs *into*, so the
-                  // line arriving at a cancellation is red.
-                  rows[index + 1].closing
-                    ? 'bg-danger'
-                    : rows[index + 1].done
-                    ? 'bg-success'
-                    : 'bg-ink-200'
-                }`}
-              />
-            )}
-
-            <span
-              className={`relative z-10 grid h-7 w-7 shrink-0 place-items-center rounded-full ring-4 ring-white ${
-                closing
-                  ? 'bg-danger text-white'
-                  : row.done
-                  ? 'bg-success text-white'
-                  : 'bg-ink-200 text-ink-400'
-              } ${row.active ? 'animate-pulse' : ''}`}
-            >
-              {closing ? (
-                <Icon name="close" size={13} />
-              ) : row.done ? (
-                <Icon name="check" size={13} />
-              ) : (
-                <span className="h-2 w-2 rounded-full bg-current" />
-              )}
-            </span>
-
-            <div className="min-w-0 pt-0.5">
-              <p
-                className={`text-sm font-semibold ${
-                  closing ? 'text-red-800' : row.done ? 'text-ink-900' : 'text-ink-400'
-                }`}
-              >
-                {t(row.label)}
-              </p>
-              {row.at && (
-                <p className={`text-xs ${closing ? 'text-red-700' : 'text-ink-500'}`}>
-                  {formatDateTime(row.at)}
-                </p>
-              )}
-
-              {closing ? (
-                <div className="mt-2 rounded-lg bg-red-50 p-3 text-xs">
-                  <p className="font-semibold text-red-800">
-                    {row.by === 'customer'
-                      ? t('detail.cancelledByYou')
-                      : row.by === 'admin'
-                      ? t('detail.cancelledByStore')
-                      : t('detail.cancelledTitle')}
-                  </p>
-                  {/* An admin-authored reason, or the shopper's own words, shown as
-                      written; only our fallback sentence is translated. */}
-                  <p className="mt-0.5 text-red-700">
-                    {t('detail.cancelledReason', {
-                      reason: row.reason || t('detail.cancelledDefault'),
-                    })}
-                  </p>
-                </div>
-              ) : (
-                row.note && <p className="mt-0.5 text-xs text-ink-500">{row.note}</p>
-              )}
-            </div>
-          </li>
-        );
-      })}
-    </ol>
-  );
+  return <Timeline rows={rows} />;
 }
 
 export default function OrderDetail() {
@@ -186,6 +126,16 @@ export default function OrderDetail() {
    * disappearing, which reads as the feature being broken.
    */
   const [dialog, setDialog] = useState(null);
+  /**
+   * Which journey the tracking card is showing. It is only ever consulted when
+   * the order has a return, and it starts on the return: that is the half still
+   * moving, and it is what the shopper opened the page to check.
+   */
+  const [journey, setJourney] = useState('return');
+  // The choice belongs to the order being read, not to the page: walking from
+  // one order to the next reuses this component, and a tab left on the order's
+  // history would otherwise hide the next order's live return.
+  useEffect(() => setJourney('return'), [id]);
   const { commerce } = useSettings();
 
   const { data, loading, error, refetch } = useFetch(
@@ -278,6 +228,8 @@ export default function OrderDetail() {
   const returnPolicy = data?.data?.returnPolicy || {};
   const returnWindowDays = returnPolicy.windowDays ?? commerce.returnWindowDays;
   const returnStatus = order.returnRequest?.status;
+  // Whether there is a second journey to switch to at all.
+  const hasReturn = Boolean(returnStatus);
   const returnInProgress = RETURN_OPEN_STATUSES.includes(returnStatus);
   const canReturn = Boolean(returnPolicy.eligible);
   // Offered on a delivered order right up until it has been returned. Past the
@@ -305,7 +257,7 @@ export default function OrderDetail() {
       <section className="card p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h1 className="text-xl font-bold text-ink-900">{order.orderNumber}</h1>
+            <h1 className="panel-title">{order.orderNumber}</h1>
             <p className="mt-0.5 text-sm text-ink-500">
               {t('detail.placedOn', { date: formatDateTime(order.createdAt) })}
             </p>
@@ -337,7 +289,7 @@ export default function OrderDetail() {
             <button
               type="button"
               onClick={() => setDialog(canCancel ? 'confirm' : 'blocked')}
-              className="btn-outline !text-danger"
+              className="btn-outline-danger"
             >
               {t('detail.cancelOrder')}
             </button>
@@ -347,40 +299,100 @@ export default function OrderDetail() {
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="space-y-5">
-          {/* The return is its own journey over the same parcel, so it gets its
-              own tracker above the order's — and it goes first, because while a
-              return is running it is the only part still moving. */}
-          <ReturnTracker order={order} />
+          {/* Both journeys over the same parcel live in this one card. A return
+              is a second trip, not a continuation of the first, so it keeps its
+              own tracker — but behind a tab rather than in a card of its own,
+              so the page has a single place that answers "where has this got
+              to". Without a return there is nothing to switch between and the
+              card is simply the order's timeline, headed as before. */}
+          <section className={hasReturn ? 'card overflow-hidden' : 'card p-5'}>
+            {hasReturn ? (
+              /* One header strip across the top of the card — tabs left, the
+                 return's own state right — drawn exactly as the product page
+                 draws its tabs: full-bleed on `bg-ink-50`, the active tab lifted
+                 out of the strip in white under a brand underline. The card
+                 turns `overflow-hidden` and the padding moves onto the panel so
+                 the strip can reach the card's edges.
 
-          <section className="card p-5">
-            <h2 className="mb-4 text-base font-bold text-ink-900">{t('detail.orderStatus')}</h2>
-            <StatusTimeline order={order} t={t} />
+                 The tabs run in the order the parcel travelled: the order first,
+                 the return it may have started second. */
+              <div className="flex items-center justify-between gap-3 border-b border-ink-200 bg-ink-50 pr-4">
+                <div
+                  role="tablist"
+                  aria-label={t('detail.orderStatus')}
+                  className="hide-scrollbar flex overflow-x-auto"
+                >
+                  {[
+                    { key: 'order', label: t('detail.orderStatus') },
+                    { key: 'return', label: t('detail.returnStatusHeading') },
+                  ].map((tab) => (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      role="tab"
+                      id={`journey-tab-${tab.key}`}
+                      aria-controls="journey-panel"
+                      aria-selected={journey === tab.key}
+                      onClick={() => setJourney(tab.key)}
+                      className={`whitespace-nowrap border-b-2 px-5 py-3.5 text-sm font-semibold transition ${
+                        journey === tab.key
+                          ? 'border-brand-600 bg-white text-brand-600'
+                          : 'border-transparent text-ink-500 hover:text-ink-800'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
 
-            {(order.trackingNumber || order.expectedDeliveryDate) && (
-              <div className="mt-4 grid gap-3 rounded-lg bg-ink-50 p-4 text-sm sm:grid-cols-2">
-                {order.trackingNumber && (
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-ink-400">
-                      {t('detail.trackingLabel')}
-                    </p>
-                    <p className="font-semibold text-ink-800">
-                      {order.trackingNumber}
-                      {order.courierPartner && ` · ${order.courierPartner}`}
-                    </p>
-                  </div>
-                )}
-                {order.expectedDeliveryDate && (
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-ink-400">
-                      {t('detail.expectedDelivery')}
-                    </p>
-                    <p className="font-semibold text-ink-800">
-                      {formatDate(order.expectedDeliveryDate)}
-                    </p>
-                  </div>
-                )}
+                {/* Only on the tab it describes — on the order's tab the page
+                    header's own status badges already answer the question. */}
+                {journey === 'return' && <ReturnStatusBadge status={order.returnRequest.status} />}
               </div>
+            ) : (
+              <h2 className="mb-4 text-base font-bold text-ink-900">{t('detail.orderStatus')}</h2>
             )}
+
+            <div
+              id="journey-panel"
+              className={hasReturn ? 'p-5' : undefined}
+              role={hasReturn ? 'tabpanel' : undefined}
+              aria-labelledby={hasReturn ? `journey-tab-${journey}` : undefined}
+            >
+              {hasReturn && journey === 'return' ? (
+                <ReturnTracker order={order} />
+              ) : (
+                <>
+                <StatusTimeline order={order} t={t} />
+
+                {(order.trackingNumber || order.expectedDeliveryDate) && (
+                  <div className="mt-4 grid gap-3 rounded-lg bg-ink-50 p-4 text-sm sm:grid-cols-2">
+                    {order.trackingNumber && (
+                      <div>
+                        <p className="text-xs font-medium uppercase tracking-wide text-ink-400">
+                          {t('detail.trackingLabel')}
+                        </p>
+                        <p className="font-semibold text-ink-800">
+                          {order.trackingNumber}
+                          {order.courierPartner && ` · ${order.courierPartner}`}
+                        </p>
+                      </div>
+                    )}
+                    {order.expectedDeliveryDate && (
+                      <div>
+                        <p className="text-xs font-medium uppercase tracking-wide text-ink-400">
+                          {t('detail.expectedDelivery')}
+                        </p>
+                        <p className="font-semibold text-ink-800">
+                          {formatDate(order.expectedDeliveryDate)}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+                </>
+              )}
+            </div>
           </section>
 
           <section className="card p-5">

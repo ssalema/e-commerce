@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { Fragment, useCallback, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { orderApi } from '../../api/endpoints';
@@ -15,8 +15,14 @@ import EmptyState from '../../components/common/EmptyState';
 import ErrorState from '../../components/common/ErrorState';
 import { ListRowSkeleton } from '../../components/common/Skeleton';
 
-/* Values are the API's; the labels come from the shared `orderStatus` map. */
-const FILTERS = ['all', 'pending', 'confirmed', 'packed', 'shipped', 'delivered', 'cancelled'];
+/*
+ * Values are the API's; the labels come from the shared `orderStatus` map —
+ * except the two that name no order status: "all", and "returns", which asks a
+ * different question of the API. A returning order stays Delivered underneath,
+ * so it could never be an eighth order status without vanishing from
+ * "Delivered"; it is a filter over the return raised on top of the order.
+ */
+const FILTERS = ['all', 'pending', 'confirmed', 'packed', 'shipped', 'delivered', 'cancelled', 'returns'];
 
 /**
  * The step each status is waiting for — the server's own STATUS_FLOW with the
@@ -40,8 +46,18 @@ export default function Orders() {
   const [status, setStatus] = useState('all');
   const [page, setPage] = useState(1);
 
+  // "returns" is asked as ?returnStatus=any — every order carrying a return,
+  // whatever the order status underneath it says.
   const { data, loading, error, refetch } = useFetch(
-    useCallback(() => orderApi.list({ status, page, limit: 8 }), [status, page]),
+    useCallback(
+      () =>
+        orderApi.list(
+          status === 'returns'
+            ? { returnStatus: 'any', page, limit: 8 }
+            : { status, page, limit: 8 }
+        ),
+      [status, page]
+    ),
     [status, page]
   );
 
@@ -51,30 +67,46 @@ export default function Orders() {
   const orders = data?.data?.orders || [];
   const meta = data?.meta;
 
+  // One name per filter, for the chip and for the empty state that quotes it.
+  const filterLabel = (value) =>
+    value === 'all'
+      ? t('orders.filterAll')
+      : value === 'returns'
+        ? t('orders.filterReturns')
+        : t(`common:orderStatus.${value}`);
+
   return (
     <div>
       <Seo title={t('common:nav.myOrders')} noIndex />
 
-      <h1 className="mb-4 text-xl font-bold text-ink-900">{t('common:nav.myOrders')}</h1>
+      <h1 className="mb-4 panel-title">{t('common:nav.myOrders')}</h1>
 
       <div className="hide-scrollbar mb-5 flex gap-2 overflow-x-auto pb-1">
         {FILTERS.map((value) => (
-          <button
-            key={value}
-            type="button"
-            onClick={() => {
-              setStatus(value);
-              setPage(1);
-            }}
-            aria-pressed={status === value}
-            className={`shrink-0 rounded-full px-4 py-1.5 text-sm font-medium transition ${
-              status === value
-                ? 'bg-brand-600 text-white'
-                : 'border border-ink-300 bg-white text-ink-600 hover:border-brand-500 hover:text-brand-600'
-            }`}
-          >
-            {value === 'all' ? t('orders.filterAll') : t(`common:orderStatus.${value}`)}
-          </button>
+          <Fragment key={value}>
+            {/* The one filter that asks a different question gets a hairline in
+                front of it — the admin says the same thing by giving Return a
+                control of its own, next to the order-status one rather than
+                inside it. */}
+            {value === 'returns' && (
+              <span aria-hidden="true" className="mx-1 h-6 w-px shrink-0 self-center bg-ink-200" />
+            )}
+            <button
+              type="button"
+              onClick={() => {
+                setStatus(value);
+                setPage(1);
+              }}
+              aria-pressed={status === value}
+              className={`shrink-0 rounded-full px-4 py-1.5 text-sm font-medium transition ${
+                status === value
+                  ? 'bg-brand-600 text-white'
+                  : 'border border-ink-300 bg-white text-ink-600 hover:border-brand-500 hover:text-brand-600'
+              }`}
+            >
+              {filterLabel(value)}
+            </button>
+          </Fragment>
         ))}
       </div>
 
@@ -88,7 +120,9 @@ export default function Orders() {
           title={
             status === 'all'
               ? t('orders.emptyTitle')
-              : t('orders.emptyFiltered', { status: t(`common:orderStatus.${status}`) })
+              : status === 'returns'
+                ? t('orders.emptyReturns')
+                : t('orders.emptyFiltered', { status: filterLabel(status) })
           }
           message={t(status === 'all' ? 'orders.emptyMessage' : 'orders.emptyFilteredMessage')}
           actionLabel={t(status === 'all' ? 'orders.startShopping' : 'orders.showAll')}

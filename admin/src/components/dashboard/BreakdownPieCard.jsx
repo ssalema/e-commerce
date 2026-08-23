@@ -7,7 +7,7 @@ import Skeleton from '@mui/material/Skeleton';
 import { PieChart } from '@mui/x-charts/PieChart';
 
 import { formatNumber } from '../../utils/format';
-import { CATEGORICAL, OTHER_COLOR } from './chartTokens';
+import { CATEGORICAL, FADED_INK, ON_SERIES_INK, OTHER_COLOR } from './chartTokens';
 
 /**
  * Keeps identity stable: the Nth slice always gets the Nth categorical hue, and
@@ -84,14 +84,14 @@ export default function BreakdownPieCard({
                   paddingAngle: 1.5,
                   cornerRadius: donut ? 4 : 2,
                   highlightScope: { faded: 'global', highlighted: 'item' },
-                  faded: { innerRadius: donut ? 70 : 0, additionalRadius: -6, color: '#cbd5e1' },
+                  faded: { innerRadius: donut ? 70 : 0, additionalRadius: -6, color: FADED_INK },
                   arcLabel: (item) => (percent(item.value) >= 8 ? `${percent(item.value)}%` : ''),
                   arcLabelMinAngle: 22,
                   valueFormatter: (item) => `${formatNumber(item.value)} (${percent(item.value)}%)`,
                 },
               ]}
               slotProps={{ legend: { hidden: true } }}
-              sx={{ '& .MuiPieArcLabel-root': { fill: '#ffffff', fontWeight: 700, fontSize: 12 } }}
+              sx={{ '& .MuiPieArcLabel-root': { fill: ON_SERIES_INK, fontWeight: 700, fontSize: 12 } }}
             />
 
             <Stack direction="row" flexWrap="wrap" justifyContent="center" sx={{ mt: 1, gap: 1.25 }}>

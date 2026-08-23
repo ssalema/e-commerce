@@ -70,7 +70,7 @@ export default function StepPreview({ values, categories, subCategoryName, issue
         </Alert>
       )}
 
-      <Grid container spacing={3}>
+      <Grid container spacing={2.5}>
         {/* ---------- Storefront card preview ---------- */}
         <Grid size={{ xs: 12, md: 4 }}>
           <Typography variant="subtitle2" color="text.secondary" gutterBottom>

@@ -357,6 +357,15 @@ exports.getMyOrders = asyncHandler(async (req, res) => {
 
   const filter = { user: req.user._id };
   if (req.query.status && req.query.status !== 'all') filter.orderStatus = req.query.status;
+  // The shopper's own returns filter, the same shape the panel's returns queue
+  // uses: ?returnStatus=any for every order a return was ever raised on, or one
+  // named return status. It is a filter of its own rather than another order
+  // status because the order underneath stays Delivered while its return runs —
+  // folding the two would hide a returning order from "Delivered".
+  if (req.query.returnStatus && req.query.returnStatus !== 'all') {
+    filter['returnRequest.status'] =
+      req.query.returnStatus === 'any' ? { $ne: null } : req.query.returnStatus;
+  }
 
   const [orders, total] = await Promise.all([
     Order.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean({ virtuals: true }),

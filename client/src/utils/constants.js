@@ -21,6 +21,19 @@ export const SORT_OPTIONS = [
 export const DISCOUNT_FILTERS = [10, 20, 30, 40, 50];
 export const RATING_FILTERS = [4, 3, 2, 1];
 
+/*
+ * The two product-grid widths, named once.
+ *
+ * A listing gives a column to its filter rail, so it fits one tile fewer than a
+ * page that runs the full width. Both the grid and the skeleton standing in for
+ * it read from here — when the two disagreed, the placeholder shimmered at five
+ * across and the products landed at four, and the whole page jumped on load.
+ */
+export const PRODUCT_GRID_COLUMNS = {
+  full: 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5',
+  withSidebar: 'grid-cols-2 sm:grid-cols-3 xl:grid-cols-4',
+};
+
 export const ORDER_STATUS_STEPS = [
   'pending',
   'confirmed',

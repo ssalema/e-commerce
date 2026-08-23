@@ -19,7 +19,6 @@ import MenuItem from '@mui/material/MenuItem';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Switch from '@mui/material/Switch';
 import CircularProgress from '@mui/material/CircularProgress';
-import LinearProgress from '@mui/material/LinearProgress';
 import Alert from '@mui/material/Alert';
 
 import AddIcon from '@mui/icons-material/Add';
@@ -34,8 +33,10 @@ import { EVENTS } from '../realtime/events';
 import PageHeader from '../components/common/PageHeader';
 import EmptyState from '../components/common/EmptyState';
 import ErrorState from '../components/common/ErrorState';
+import StatusChip from '../components/common/StatusChip';
 import ConfirmDialog from '../components/common/ConfirmDialog';
 import ImageUploader from '../components/products/ImageUploader';
+import CardGridSkeleton from '../components/common/CardGridSkeleton';
 
 const EMPTY = {
   title: '', subtitle: '', ctaLabel: 'Shop Now', ctaLink: '/products',
@@ -268,16 +269,16 @@ export default function Banners() {
         breadcrumbs={[{ label: 'Banners' }]}
         action={
           <Button variant="contained" startIcon={<AddIcon />} onClick={() => setDialog({})}>
-            Add Banner
+            Add banner
           </Button>
         }
       />
 
-      {query.loading && <LinearProgress sx={{ mb: 2 }} />}
-
       {/* A failed load has to say so: falling through to the empty state below would
           tell the reader the homepage has no banners when it only could not be read. */}
-      {!query.loading && query.error ? (
+      {query.loading ? (
+        <CardGridSkeleton count={4} size={{ xs: 12, md: 6 }} mediaRatio="16/6" />
+      ) : query.error ? (
         <Card>
           <ErrorState
             title="Could not load the banners"
@@ -285,12 +286,12 @@ export default function Banners() {
             onRetry={query.refetch}
           />
         </Card>
-      ) : !query.loading && banners.length === 0 ? (
+      ) : banners.length === 0 ? (
         <Card>
           <EmptyState
             title="No banners yet"
             message="The homepage hero slider stays hidden until you publish at least one banner."
-            actionLabel="Add Banner"
+            actionLabel="Add banner"
             onAction={() => setDialog({})}
           />
         </Card>
@@ -310,16 +311,22 @@ export default function Banners() {
                   <Stack direction="row" spacing={0.75} sx={{ position: 'absolute', top: 10, left: 10 }}>
                     <Chip label={`#${banner.displayOrder}`} size="small" sx={{ bgcolor: 'rgba(15,23,42,.8)', color: '#fff' }} />
                     <Chip label={banner.placement} size="small" color="primary" />
-                    {!banner.isActive && <Chip label="Hidden" size="small" color="warning" />}
                   </Stack>
                 </Box>
 
                 <CardContent>
                   <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
                     <Box sx={{ minWidth: 0 }}>
-                      <Typography variant="subtitle1" fontWeight={700} noWrap>
-                        {banner.title}
-                      </Typography>
+                      {/* The off-state badge sits beside the name, where the brand
+                          and category cards carry theirs — on the artwork it had to
+                          be amber to stay legible, which read as a fault rather than
+                          as a slide someone had deliberately taken down. */}
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <Typography variant="subtitle1" fontWeight={700} noWrap>
+                          {banner.title}
+                        </Typography>
+                        {!banner.isActive && <StatusChip status="inactive" kind="availability" />}
+                      </Stack>
                       {banner.subtitle && (
                         <Typography variant="body2" color="text.secondary" noWrap>
                           {banner.subtitle}

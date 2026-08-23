@@ -1,7 +1,8 @@
 import { useTranslation } from 'react-i18next';
 
 import Icon from '../common/Icon';
-import { formatDateTime, formatPrice } from '../../utils/format';
+import Timeline from './Timeline';
+import { formatPrice } from '../../utils/format';
 import { RETURN_STATUS_STEPS } from '../../utils/constants';
 
 /**
@@ -19,118 +20,131 @@ const NOTES = [
 ];
 
 /**
- * The return's own progress, drawn as the horizontal four-step tracker the
- * shopper is shown from the moment they raise it:
+ * The rows the return's timeline draws — the twin of `timelineRows` in
+ * client/src/pages/account/OrderDetail.jsx, over the return's own ladder:
  *
  *   Return Requested → Out for Pickup → Refund Started → Refund Success
  *
- * It is deliberately *not* the order's vertical timeline. The order's journey
- * ended at "Delivered" and the return is a second, separate journey over the same
- * parcel — drawing them as one ladder would put "Refund Success" underneath
- * "Delivered" and invite the question of which one the order is actually in.
+ * A declined return is read the way a cancelled order is: it stopped somewhere
+ * along the path, so the steps it really reached stay complete and green, the
+ * refusal is appended as the closing row in its own words, and the steps it
+ * never got to are not drawn at all — a grey "Refund Success" under a declined
+ * return invites exactly the question it cannot answer.
  *
- * A rejected return has no fourth step to reach, so the steps stop where they
- * stopped and the refusal is stated underneath in its own words.
+ * A live return keeps the full ladder ahead of it, greyed, so the shopper can
+ * see what is still to come.
  */
+function returnRows(request, t) {
+  const history = request.history || [];
+  const rejected = request.status === 'rejected';
+  const rankOf = (status) => RETURN_STATUS_STEPS.indexOf(status);
+  const entryFor = (status) => history.find((row) => row.status === status);
+
+  const reachedFromHistory = history.reduce((max, row) => Math.max(max, rankOf(row.status)), -1);
+  // "Return Requested" is true of every return, whether or not a `requested`
+  // row was ever written — raising it is what created the request.
+  const reached = rejected
+    ? Math.max(reachedFromHistory, 0)
+    : Math.max(reachedFromHistory, rankOf(request.status), 0);
+
+  const stampFor = (key) =>
+    ({
+      requested: request.requestedAt,
+      out_for_pickup: request.pickedUpAt || entryFor('out_for_pickup')?.changedAt,
+      refund_started: request.refundStartedAt,
+      refund_success: request.refundCompletedAt,
+    })[key];
+
+  const steps = RETURN_STATUS_STEPS.slice(0, rejected ? reached + 1 : undefined).map(
+    (key, index) => ({
+      key,
+      label: t(`detail.returnSteps.${key}`),
+      done: index <= reached,
+      // Nothing is still in flight once the request has been refused, and the
+      // last step is where the journey ends rather than something in progress.
+      active: !rejected && index === reached && reached < RETURN_STATUS_STEPS.length - 1,
+      at: stampFor(key) || (index === 0 ? request.requestedAt : entryFor(key)?.changedAt),
+      // The row that raised the return is stamped with the reason as its note,
+      // which the details underneath already state in full — so it is dropped
+      // here rather than said twice a few lines apart.
+      note: key === 'requested' ? null : entryFor(key)?.note,
+    })
+  );
+
+  if (!rejected) return steps;
+
+  return [
+    ...steps,
+    {
+      key: 'rejected',
+      label: t('detail.returnSteps.rejected'),
+      done: true,
+      closing: true,
+      at: request.rejectedAt || entryFor('rejected')?.changedAt,
+      panel: {
+        title: t('detail.returnRejectedTitle'),
+        // An admin-authored reason, shown as written; only our fallback
+        // sentence is translated.
+        text: request.rejectionReason || t('detail.returnRejectedDefault'),
+      },
+    },
+  ];
+}
+
+/**
+ * The return's own progress, drawn as the same vertical ladder the order's
+ * timeline uses — same beads, same rail, same stamps, same red closing row.
+ *
+ * It is deliberately not *appended* to the order's timeline. The order's journey
+ * ended at "Delivered" and the return is a second, separate journey over the
+ * same parcel; drawing them as one ladder would put "Refund Success" underneath
+ * "Delivered" and invite the question of which one the order is actually in.
+ * The two live in one card behind a tab apiece instead, so the page offers a
+ * single place to read "where has this got to" — and now a single way to read
+ * it, rather than two trackers shaped differently enough to need learning twice.
+ *
+ * This renders the panel only — the card and the tab that selects it belong to
+ * the page that owns both journeys.
+ */
+/**
+ * The return's own state, as a pill.
+ *
+ * It lives out here because the card's header is where it belongs — on the tab
+ * row, opposite the tabs, the way the panel puts its action there — and that
+ * header is owned by the page, not by this panel. Inside the panel it sat on a
+ * line of its own under the tabs, which read as an empty band.
+ */
+export function ReturnStatusBadge({ status }) {
+  const { t } = useTranslation(['account']);
+
+  return (
+    <span
+      className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${
+        status === 'rejected'
+          ? 'bg-red-50 text-red-700 ring-red-200'
+          : status === 'refund_success'
+            ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
+            : 'bg-amber-50 text-amber-700 ring-amber-200'
+      }`}
+    >
+      {t(`detail.returnSteps.${status}`)}
+    </span>
+  );
+}
+
 export default function ReturnTracker({ order }) {
   const { t } = useTranslation(['account', 'common']);
 
   const request = order.returnRequest;
   if (!request?.status) return null;
 
-  const history = request.history || [];
   const rejected = request.status === 'rejected';
-
-  // Where the tracker has got to. A rejected return keeps whatever it had
-  // reached: the pickup really did happen if it happened, and erasing it would
-  // make the refusal unreadable.
-  const reachedFrom = history.reduce(
-    (max, row) => Math.max(max, RETURN_STATUS_STEPS.indexOf(row.status)),
-    -1
-  );
-  const reached = Math.max(reachedFrom, RETURN_STATUS_STEPS.indexOf(request.status), 0);
-
-  const stampFor = (key) =>
-    ({
-      requested: request.requestedAt,
-      out_for_pickup: history.find((row) => row.status === 'out_for_pickup')?.changedAt,
-      refund_started: request.refundStartedAt,
-      refund_success: request.refundCompletedAt,
-    })[key];
-
-  const done = (index) => index <= reached;
-  // Nothing is still in flight once the request has been refused.
-  const active = (index) => !rejected && index === reached && reached < RETURN_STATUS_STEPS.length - 1;
-
   const settled = request.status === 'refund_success';
   const refundAmount = request.refundAmount ?? order.pricing?.total;
 
   return (
-    <section className="card p-5">
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-bold text-ink-900">{t('detail.returnStatusHeading')}</h2>
-        <span
-          className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${
-            rejected
-              ? 'bg-red-50 text-red-700 ring-red-200'
-              : settled
-                ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
-                : 'bg-amber-50 text-amber-700 ring-amber-200'
-          }`}
-        >
-          {t(`detail.returnSteps.${request.status}`)}
-        </span>
-      </div>
-
-      {/* ---------- the four steps ---------- */}
-      <ol className="grid grid-cols-4 gap-x-1">
-        {RETURN_STATUS_STEPS.map((key, index) => {
-          const complete = done(index);
-          const at = stampFor(key);
-          const last = index === RETURN_STATUS_STEPS.length - 1;
-
-          return (
-            <li key={key} className="relative min-w-0">
-              {/* The rail runs *out* of this dot toward the next one, and takes
-                  the colour of the step it arrives at — so the green stops
-                  exactly where the progress does. */}
-              {!last && (
-                <span
-                  aria-hidden="true"
-                  className={`absolute left-1/2 top-[13px] h-0.5 w-full ${
-                    done(index + 1) ? 'bg-success' : 'bg-ink-200'
-                  }`}
-                />
-              )}
-
-              <span
-                className={`relative z-10 grid h-7 w-7 place-items-center rounded-full ${
-                  complete ? 'bg-success text-white' : 'bg-ink-200 text-ink-400'
-                } ${active(index) ? 'animate-pulse' : ''}`}
-              >
-                {complete ? (
-                  <Icon name="check" size={13} />
-                ) : (
-                  <span className="h-2 w-2 rounded-full bg-current" />
-                )}
-              </span>
-
-              <p
-                className={`mt-2 pr-2 text-xs font-semibold leading-tight ${
-                  complete ? 'text-ink-900' : 'text-ink-400'
-                }`}
-              >
-                {t(`detail.returnSteps.${key}`)}
-              </p>
-              {at && complete && (
-                <p className="mt-0.5 pr-2 text-[11px] leading-tight text-ink-500">
-                  {formatDateTime(at)}
-                </p>
-              )}
-            </li>
-          );
-        })}
-      </ol>
+    <div>
+      <Timeline rows={returnRows(request, t)} />
 
       {/* ---------- why, and for how much ---------- */}
       <dl className="mt-5 grid gap-3 rounded-lg bg-ink-50 p-4 text-sm sm:grid-cols-2">
@@ -170,17 +184,9 @@ export default function ReturnTracker({ order }) {
         )}
       </dl>
 
-      {rejected ? (
-        <div className="mt-4 rounded-lg bg-red-50 p-4">
-          <p className="flex items-center gap-1.5 text-sm font-semibold text-red-800">
-            <Icon name="alert" size={15} />
-            {t('detail.returnRejectedTitle')}
-          </p>
-          <p className="mt-1 text-xs text-red-700">
-            {request.rejectionReason || t('detail.returnRejectedDefault')}
-          </p>
-        </div>
-      ) : settled ? (
+      {/* A declined return has already said so, in the closing row of the
+          ladder — repeating it underneath would be the same sentence twice. */}
+      {settled ? (
         <div className="mt-4 flex items-start gap-2.5 rounded-lg bg-emerald-50 p-4">
           <Icon name="check" size={16} className="mt-0.5 shrink-0 text-success" />
           <p className="text-xs text-emerald-800">
@@ -188,23 +194,25 @@ export default function ReturnTracker({ order }) {
           </p>
         </div>
       ) : (
-        /* ---------- the pickup small print, while one is still coming ---------- */
-        <div className="mt-4 rounded-xl bg-brand-50/60 p-4">
-          <p className="mb-3 text-sm font-bold text-ink-900">{t('detail.returnNoteTitle')}</p>
-          <ul className="space-y-3">
-            {NOTES.map((note) => (
-              <li key={note.key} className="flex items-start gap-3">
-                <span className="mt-0.5 shrink-0 text-ink-500">
-                  <Icon name={note.icon} size={18} />
-                </span>
-                <span className="text-sm leading-snug text-ink-600">
-                  {t(`detail.returnNotes.${note.key}`)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
+        !rejected && (
+          /* ---------- the pickup small print, while one is still coming ---------- */
+          <div className="mt-4 rounded-xl bg-brand-50/60 p-4">
+            <p className="mb-3 text-sm font-bold text-ink-900">{t('detail.returnNoteTitle')}</p>
+            <ul className="space-y-3">
+              {NOTES.map((note) => (
+                <li key={note.key} className="flex items-start gap-3">
+                  <span className="mt-0.5 shrink-0 text-ink-500">
+                    <Icon name={note.icon} size={18} />
+                  </span>
+                  <span className="text-sm leading-snug text-ink-600">
+                    {t(`detail.returnNotes.${note.key}`)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )
       )}
-    </section>
+    </div>
   );
 }

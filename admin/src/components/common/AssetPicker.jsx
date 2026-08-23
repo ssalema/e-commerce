@@ -142,7 +142,7 @@ export default function AssetPicker({
                 <Tooltip title={`Remove ${label.toLowerCase()}`}>
                   <IconButton
                     size="small"
-                    sx={{ color: '#fca5a5' }}
+                    sx={{ color: 'error.light' }}
                     onClick={() => onChange({ url: '', publicId: '' })}
                   >
                     <DeleteIcon sx={{ fontSize: 18 }} />

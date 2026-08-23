@@ -19,9 +19,16 @@ const paymentController = require('./controllers/payment.controller');
 
 const app = express();
 
-// Behind nginx/Heroku/Render the client IP arrives in X-Forwarded-For; rate limiting
-// and secure cookies both depend on this being correct.
-app.set('trust proxy', 1);
+/**
+ * Behind nginx/Heroku/Render the client IP arrives in X-Forwarded-For; rate
+ * limiting and secure cookies both depend on this being correct.
+ *
+ * Configurable because the right value is a property of the deployment, not of
+ * the code, and guessing it wrong is a security bug in one direction (a client
+ * that can spoof its own `req.ip` sheds every per-IP limit) and an availability
+ * bug in the other (everyone shares one bucket). See TRUST_PROXY_HOPS.
+ */
+app.set('trust proxy', env.trustProxy);
 
 /* ---------------- Security ---------------- */
 /**

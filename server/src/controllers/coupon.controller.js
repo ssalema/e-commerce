@@ -4,6 +4,9 @@ const { sendSuccess, paginationMeta } = require('../utils/apiResponse');
 const { Coupon } = require('../models');
 const broadcast = require('../realtime/broadcast');
 
+/** Search terms are data, never pattern syntax. */
+const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 /**
  * Blank means unlimited/uncapped, never zero. The schema setters enforce this on
  * the way into the database; doing it here too keeps the conflict and range
@@ -101,7 +104,12 @@ exports.listCoupons = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.query.status === 'active') filter.isActive = true;
   if (req.query.status === 'inactive') filter.isActive = false;
-  if (req.query.search) filter.code = new RegExp(String(req.query.search).toUpperCase(), 'i');
+  // Escaped, like every other search in the API: an unescaped pattern here let a
+  // crafted `?search=` be evaluated as a regex against the whole collection, which
+  // is a way to hang the event loop rather than to find a coupon.
+  if (req.query.search) {
+    filter.code = new RegExp(escapeRegex(String(req.query.search).toUpperCase()), 'i');
+  }
 
   const [coupons, total] = await Promise.all([
     Coupon.find(filter)

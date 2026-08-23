@@ -99,7 +99,7 @@ export default function MobileBottomNav() {
     <>
       <nav
         aria-label={t('a11y.menu')}
-        className="fixed inset-x-0 bottom-0 z-[70] border-t border-ink-200 bg-white
+        className="fixed inset-x-0 bottom-0 z-bottom-bar border-t border-ink-200 bg-white
                    shadow-[0_-2px_12px_rgba(15,23,42,.08)] lg:hidden"
       >
         {/* Padding, not margin, so the bar's own background reaches the screen

@@ -500,7 +500,7 @@ export default function ProductDetails() {
       {/* Room for the fixed bar is reserved by Layout, below the footer — a spacer
           here would only push the page content, leaving the footer underneath it. */}
       <div
-        className="fixed inset-x-0 bottom-0 z-[70] border-t border-ink-200 bg-white
+        className="fixed inset-x-0 bottom-0 z-bottom-bar border-t border-ink-200 bg-white
                    shadow-[0_-2px_12px_rgba(15,23,42,.1)] lg:hidden"
       >
         {/* Padding rather than margin, so the white ground reaches past the home indicator. */}
@@ -509,9 +509,7 @@ export default function ProductDetails() {
             type="button"
             onClick={() => handleAddToCart(product, quantity, variant)}
             disabled={cantBuy}
-            className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-brand-600 bg-white
-                       py-3 text-sm font-bold text-brand-600 transition active:scale-[.98]
-                       disabled:cursor-not-allowed disabled:opacity-60"
+            className="btn-outline btn-lg flex-1"
           >
             <Icon name="cart" size={20} />
             {t('common:product.addToCart')}
@@ -521,9 +519,7 @@ export default function ProductDetails() {
             type="button"
             onClick={() => handleBuyNow(product, quantity, variant)}
             disabled={cantBuy}
-            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-accent py-3 text-sm
-                       font-bold text-white shadow-sm transition hover:bg-accent-dark active:scale-[.98]
-                       disabled:cursor-not-allowed disabled:opacity-60"
+            className="btn-accent btn-lg flex-1"
           >
             {/* Two chevrons nested into a ▶▶ mark, from the same single-path icon set. */}
             <span aria-hidden="true" className="flex items-center -space-x-2">

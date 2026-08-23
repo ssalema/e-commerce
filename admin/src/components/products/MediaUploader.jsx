@@ -223,7 +223,7 @@ export default function MediaUploader({
 
     const next = list.filter((_, i) => i !== index);
     onChange(normalise(kind === 'image' ? { images: next, videos } : { images, videos: next }));
-    enqueueSnackbar(`${kind === 'image' ? 'Image' : 'Video'} removed`, { variant: 'info' });
+    enqueueSnackbar(`${kind === 'image' ? 'Image' : 'Video'} removed`, { variant: 'success' });
   };
 
   const move = (kind, index, direction) => {
