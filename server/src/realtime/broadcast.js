@@ -458,9 +458,15 @@ exports.orderStatusChanged = safe((order, note) =>
  * return's own status carried alongside so a list row can label itself without
  * refetching the whole document.
  */
-exports.orderReturnChanged = safe((order, note) => {
+exports.orderReturnChanged = safe((order, note, { originSocketId } = {}) => {
   exports.orderChanged(order, { event: EVENTS.ORDER_RETURN_CHANGED, note });
+  // Every step of a return is a member of staff's own doing, so the alert names
+  // the tab it came from: that one already said what it did, in its own words,
+  // and would otherwise raise a second toast about its own click. Same
+  // `originSocketId` convention the cart and session broadcasts use — the echo is
+  // skipped by the tab that recognises itself, not withheld from the room.
   rt.toAdmins(EVENTS.ADMIN_NOTIFICATION, {
+    originSocketId: originSocketId || null,
     kind: 'order',
     severity: order.returnRequest?.status === 'requested' ? 'warning' : 'info',
     title:

@@ -348,13 +348,25 @@ exports.getHomeFeed = asyncHandler(async (req, res) => {
     .slice(0, 20);
 
   /*
-   * Top Selling is resolved first so its ids can be held out of "For You" — two
-   * rails stacked on the homepage showing the same five products is the thing
-   * that made the manual flags look broken in the first place.
+   * Top Selling is resolved before "For You" so its ids can be held out of that rail —
+   * two rails stacked on the homepage showing the same five products is the thing that
+   * made the manual flags look broken in the first place.
+   *
+   * Only "For You" waits on it, though. The other three rails are plain sorted reads
+   * that depend on nothing, so they are launched here rather than after — awaiting
+   * them behind Top Selling made every homepage pay two serial round trips to the
+   * database where one would do, and against a remote cluster a round trip is the
+   * dominant cost of this endpoint.
    */
+  const staticRails = Promise.all([
+    Product.find(base).select(select).sort({ createdAt: -1 }).limit(10).lean({ virtuals: true }),
+    Product.find({ ...base, discountPercent: { $gte: 10 } }).select(select).sort({ discountPercent: -1 }).limit(10).lean({ virtuals: true }),
+    Product.find({ ...base, 'ratings.count': { $gt: 0 } }).select(select).sort({ 'ratings.average': -1 }).limit(10).lean({ virtuals: true }),
+  ]);
+
   const topSelling = await recommendations.getTopSelling({ select, limit: 10 });
 
-  const [forYou, newArrivals, bestDeals, topRated] = await Promise.all([
+  const [forYou, [newArrivals, bestDeals, topRated]] = await Promise.all([
     recommendations.getForYou({
       userId: req.user?._id,
       seenIds,
@@ -362,9 +374,7 @@ exports.getHomeFeed = asyncHandler(async (req, res) => {
       select,
       limit: 10,
     }),
-    Product.find(base).select(select).sort({ createdAt: -1 }).limit(10).lean({ virtuals: true }),
-    Product.find({ ...base, discountPercent: { $gte: 10 } }).select(select).sort({ discountPercent: -1 }).limit(10).lean({ virtuals: true }),
-    Product.find({ ...base, 'ratings.count': { $gt: 0 } }).select(select).sort({ 'ratings.average': -1 }).limit(10).lean({ virtuals: true }),
+    staticRails,
   ]);
 
   const lang = req.language;

@@ -10,7 +10,6 @@ import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 import Stack from '@mui/material/Stack';
 import Alert from '@mui/material/Alert';
-import Chip from '@mui/material/Chip';
 import Typography from '@mui/material/Typography';
 import CircularProgress from '@mui/material/CircularProgress';
 import CloseIcon from '@mui/icons-material/Close';
@@ -19,10 +18,10 @@ import { orderApi } from '../../api/endpoints';
 import {
   RETURN_STATUS_FLOW,
   RETURN_STATUS_LABELS,
-  RETURN_STATUS_COLOR,
   RETURN_STATUS_EFFECT,
 } from '../../utils/constants';
 import { formatPrice } from '../../utils/format';
+import ReturnStatusChip from './ReturnStatusChip';
 
 /**
  * Moving a return along its ladder.
@@ -75,7 +74,9 @@ export default function UpdateReturnStatusDialog({ order, onClose, onUpdated }) 
         pickupTrackingNumber: needsPickup ? pickupTrackingNumber.trim() || undefined : undefined,
         refundReference: isRefundSuccess ? refundReference.trim() || undefined : undefined,
       });
-      enqueueSnackbar(`Return marked as ${RETURN_STATUS_LABELS[status]}`, { variant: 'success' });
+      enqueueSnackbar(`Return marked as ${RETURN_STATUS_LABELS[status]} — ${order.orderNumber}`, {
+        variant: 'success',
+      });
       onUpdated();
     } catch (err) {
       enqueueSnackbar(err.message || 'Could not update the return', { variant: 'error' });
@@ -108,12 +109,7 @@ export default function UpdateReturnStatusDialog({ order, onClose, onUpdated }) 
             <Typography variant="body2" color="text.secondary">
               Current step:
             </Typography>
-            <Chip
-              size="small"
-              label={RETURN_STATUS_LABELS[request.status]}
-              color={RETURN_STATUS_COLOR[request.status] || 'default'}
-              sx={{ fontWeight: 700 }}
-            />
+            <ReturnStatusChip status={request.status} />
           </Stack>
 
           {/* The customer's own words, or the label they picked — what the person
@@ -159,7 +155,7 @@ export default function UpdateReturnStatusDialog({ order, onClose, onUpdated }) 
                 <>
                   <TextField
                     fullWidth
-                    label="Pickup partner"
+                    label="Pickup by"
                     value={pickupPartner}
                     onChange={(e) => setPickupPartner(e.target.value)}
                     helperText="Shown to the customer on their return tracker"
@@ -167,7 +163,7 @@ export default function UpdateReturnStatusDialog({ order, onClose, onUpdated }) 
                   />
                   <TextField
                     fullWidth
-                    label="Pickup tracking number"
+                    label="Pickup tracking id"
                     value={pickupTrackingNumber}
                     onChange={(e) => setPickupTrackingNumber(e.target.value)}
                     inputProps={{ maxLength: 60 }}
@@ -178,7 +174,7 @@ export default function UpdateReturnStatusDialog({ order, onClose, onUpdated }) 
               {isRefundSuccess && (
                 <TextField
                   fullWidth
-                  label="Refund reference"
+                  label="Refund reference number"
                   value={refundReference}
                   onChange={(e) => setRefundReference(e.target.value)}
                   helperText="The gateway or bank reference a customer chasing the money can be quoted"

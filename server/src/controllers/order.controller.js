@@ -360,11 +360,20 @@ exports.getMyOrders = asyncHandler(async (req, res) => {
   // The shopper's own returns filter, the same shape the panel's returns queue
   // uses: ?returnStatus=any for every order a return was ever raised on, or one
   // named return status. It is a filter of its own rather than another order
-  // status because the order underneath stays Delivered while its return runs —
-  // folding the two would hide a returning order from "Delivered".
+  // status because the order underneath stays Delivered while its return runs.
+  //
+  // ?returnStatus=none is its complement, and it is what the shopper's own
+  // "Delivered" tab asks with: a delivered order that has raised a return is
+  // listed under Returns, so leaving it in Delivered too would show one parcel in
+  // two places and bury the journey that is still moving. `null` matches an
+  // absent `returnRequest` as well as an explicitly null status.
   if (req.query.returnStatus && req.query.returnStatus !== 'all') {
     filter['returnRequest.status'] =
-      req.query.returnStatus === 'any' ? { $ne: null } : req.query.returnStatus;
+      req.query.returnStatus === 'any'
+        ? { $ne: null }
+        : req.query.returnStatus === 'none'
+          ? null
+          : req.query.returnStatus;
   }
 
   const [orders, total] = await Promise.all([
@@ -391,9 +400,14 @@ exports.getOrder = asyncHandler(async (req, res) => {
   }
 
   // Only the panel names the person behind each move; a shopper's own order page
-  // has no business learning which member of staff touched it.
+  // has no business learning which member of staff touched it. The return has a
+  // history of its own and it is read on the same page, so it is named the same
+  // way — without this the panel's return ladder could only say "our team".
   if (req.user.role === 'admin') {
-    await order.populate({ path: 'statusHistory.changedBy', select: 'name role' });
+    await order.populate([
+      { path: 'statusHistory.changedBy', select: 'name role' },
+      { path: 'returnRequest.history.changedBy', select: 'name role' },
+    ]);
   }
 
   // Whether the Return button is drawn, decided by the same function the return
@@ -634,7 +648,7 @@ exports.updateReturnStatus = asyncHandler(async (req, res) => {
   });
   await order.save();
 
-  broadcast.orderReturnChanged(order, note);
+  broadcast.orderReturnChanged(order, note, { originSocketId: req.get('x-socket-id') });
   if (status === 'refund_started') broadcast.stockChanged(order.items, { reason: 'order_returned' });
 
   /*
@@ -688,11 +702,18 @@ exports.listAllOrders = asyncHandler(async (req, res) => {
   if (req.query.paymentStatus && req.query.paymentStatus !== 'all') {
     filter.paymentStatus = req.query.paymentStatus;
   }
-  // The returns queue: ?returnStatus=requested for what is waiting on staff, or
-  // "any" for every order that has ever had one raised on it.
+  // The returns queue: ?returnStatus=requested for what is waiting on staff,
+  // "any" for every order that has ever had one raised on it, or "none" for the
+  // orders with no return at all — which is what the panel's Delivered filter
+  // asks with, so a delivered parcel that has started a return is listed against
+  // the return it is in and not against the delivery it has moved past.
   if (req.query.returnStatus && req.query.returnStatus !== 'all') {
     filter['returnRequest.status'] =
-      req.query.returnStatus === 'any' ? { $ne: null } : req.query.returnStatus;
+      req.query.returnStatus === 'any'
+        ? { $ne: null }
+        : req.query.returnStatus === 'none'
+          ? null
+          : req.query.returnStatus;
   }
   // The panel's shared Date control — ?range=month|year|all, or from/to for a custom
   // window — the same helper the Inbox lists and the dashboard use, so "this month"

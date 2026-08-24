@@ -10,7 +10,6 @@ import Button from '@mui/material/Button';
 import Divider from '@mui/material/Divider';
 import Avatar from '@mui/material/Avatar';
 import Tooltip from '@mui/material/Tooltip';
-import Chip from '@mui/material/Chip';
 import Skeleton from '@mui/material/Skeleton';
 import Tabs from '@mui/material/Tabs';
 import Tab from '@mui/material/Tab';
@@ -33,7 +32,6 @@ import {
   ORDER_STEP_LABELS,
   RETURN_STATUS_STEPS,
   RETURN_STATUS_LABELS,
-  RETURN_STATUS_COLOR,
   RETURN_STATUS_FLOW,
   canMarkRefunded,
   STOREFRONT_URL,
@@ -44,6 +42,7 @@ import ErrorState from '../components/common/ErrorState';
 import UpdateStatusDialog from '../components/orders/UpdateStatusDialog';
 import UpdatePaymentDialog from '../components/orders/UpdatePaymentDialog';
 import UpdateReturnStatusDialog from '../components/orders/UpdateReturnStatusDialog';
+import ReturnStatusChip from '../components/orders/ReturnStatusChip';
 
 /** The two moves that end an order — the ones the history highlights. */
 const CLOSING_STATUSES = ['cancelled', 'returned'];
@@ -589,19 +588,16 @@ export default function OrderDetail() {
       />
 
       <Stack direction="row" spacing={1.5} sx={{ mb: 3 }} flexWrap="wrap" useFlexGap>
-        <StatusChip status={order.orderStatus} />
-        <StatusChip status={order.paymentStatus} kind="payment" />
         {/* Its own chip rather than a fourth order status: the order stays
             Delivered while a return runs, and overwriting that would lose the
-            fact that the parcel did arrive. */}
-        {returnRequest && (
-          <Chip
-            size="small"
-            label={RETURN_STATUS_LABELS[returnRequest.status]}
-            color={RETURN_STATUS_COLOR[returnRequest.status] || 'default'}
-            sx={{ fontWeight: 700, alignSelf: 'center' }}
-          />
-        )}
+            fact that the parcel did arrive.
+
+            First of the three, as it is on the customer's own order page: the
+            payment cleared and the parcel arrived days before the return was
+            raised, so the return is the newest thing to have happened here. */}
+        <ReturnStatusChip status={returnRequest?.status} sx={{ alignSelf: 'center' }} />
+        <StatusChip status={order.orderStatus} />
+        <StatusChip status={order.paymentStatus} kind="payment" />
         <Typography variant="body2" color="text.secondary" sx={{ alignSelf: 'center' }}>
           {order.paymentMethod === 'cod' ? 'Cash on delivery' : 'Online (Razorpay)'}
         </Typography>
@@ -764,7 +760,7 @@ export default function OrderDetail() {
                 <Stack spacing={1}>
                   <Stack direction="row" justifyContent="space-between" spacing={2}>
                     <Typography variant="body2" color="text.secondary">
-                      Reason
+                      Reason for return
                     </Typography>
                     <Typography variant="body2" fontWeight={600} textAlign="right">
                       {returnRequest.reason}
@@ -780,14 +776,45 @@ export default function OrderDetail() {
                       </Typography>
                     </Stack>
                   )}
+                  {/* Two facts, two rows, named as the update dialog names them:
+                      the courier is who to call and the reference is what to quote,
+                      and a single "HELLO7852CD · Affan" line left the reader to
+                      work out which half was which. Either can be recorded without
+                      the other, so each stands or falls on its own. */}
+                  {returnRequest.pickupPartner && (
+                    <Stack direction="row" justifyContent="space-between" spacing={2}>
+                      <Typography variant="body2" color="text.secondary">
+                        Pickup by
+                      </Typography>
+                      <Typography variant="body2" fontWeight={600} textAlign="right">
+                        {returnRequest.pickupPartner}
+                      </Typography>
+                    </Stack>
+                  )}
                   {returnRequest.pickupTrackingNumber && (
                     <Stack direction="row" justifyContent="space-between" spacing={2}>
                       <Typography variant="body2" color="text.secondary">
-                        Pickup
+                        Pickup tracking id
                       </Typography>
                       <Typography variant="body2" fontWeight={600} textAlign="right">
                         {returnRequest.pickupTrackingNumber}
-                        {returnRequest.pickupPartner && ` · ${returnRequest.pickupPartner}`}
+                      </Typography>
+                    </Stack>
+                  )}
+                  {/* Once the money has gone back, the reference belongs beside
+                      the return that caused it — the same place the customer
+                      reads it on their own return card, so an agent on the phone
+                      is looking at the row the caller is describing. The payment
+                      summary drops it then rather than printing one number twice
+                      on one screen; a refund with no return behind it keeps it
+                      there, as its only home. */}
+                  {returnRequest.status === 'refund_success' && order.refundReference && (
+                    <Stack direction="row" justifyContent="space-between" spacing={2}>
+                      <Typography variant="body2" color="text.secondary">
+                        Refund reference number
+                      </Typography>
+                      <Typography variant="body2" fontWeight={600} textAlign="right">
+                        {order.refundReference}
                       </Typography>
                     </Stack>
                   )}
@@ -899,9 +926,12 @@ export default function OrderDetail() {
                   </Typography>
                 )}
 
-              {order.refundReference && (
+              {/* Unless the return above has already given it — see the note on
+                  that row. The customer's page hides its copy on the same
+                  condition. */}
+              {order.refundReference && returnRequest?.status !== 'refund_success' && (
                 <Typography variant="caption" color="text.secondary" sx={{ mb: 1.5, display: 'block' }}>
-                  Refund ref: {order.refundReference}
+                  Refund reference number: {order.refundReference}
                 </Typography>
               )}
 

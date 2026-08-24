@@ -93,12 +93,23 @@ export const RETURN_STATUS_LABELS = {
   rejected: 'Return Declined',
 };
 
-export const RETURN_STATUS_COLOR = {
-  requested: 'warning',
-  out_for_pickup: 'info',
-  refund_started: 'secondary',
-  refund_success: 'success',
-  rejected: 'error',
+/**
+ * Tinted exactly as the storefront tints them — RETURN_STATUS_STYLES in
+ * client/src/utils/constants.js, by hex, the same way the timeline palette
+ * below borrows the storefront's greens.
+ *
+ * Spelled out rather than mapped onto MUI's palette names because those are a
+ * different set of five colours: staff and shopper would be reading the same
+ * five states in two vocabularies, and "Out for Pickup" was blue in the panel
+ * and cyan on the storefront. Every chip in the panel draws from here, so the
+ * list, the order page and the update dialog cannot drift apart either.
+ */
+export const RETURN_STATUS_TINTS = {
+  requested: { bg: '#fffbeb', text: '#b45309', ring: '#fde68a' }, // amber
+  out_for_pickup: { bg: '#ecfeff', text: '#0e7490', ring: '#a5f3fc' }, // cyan
+  refund_started: { bg: '#eef2ff', text: '#4338ca', ring: '#c7d2fe' }, // indigo
+  refund_success: { bg: '#ecfdf5', text: '#047857', ring: '#a7f3d0' }, // emerald
+  rejected: { bg: '#fef2f2', text: '#b91c1c', ring: '#fecaca' }, // red
 };
 
 /**

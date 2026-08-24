@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import Icon from '../common/Icon';
 import Timeline from './Timeline';
 import { formatPrice } from '../../utils/format';
-import { RETURN_STATUS_STEPS } from '../../utils/constants';
+import { RETURN_STATUS_STEPS, RETURN_STATUS_STYLES } from '../../utils/constants';
 
 /**
  * The three lines of small print in the reference design's "Please Note" card.
@@ -109,10 +109,13 @@ function returnRows(request, t) {
 /**
  * The return's own state, as a pill.
  *
- * It lives out here because the card's header is where it belongs — on the tab
- * row, opposite the tabs, the way the panel puts its action there — and that
- * header is owned by the page, not by this panel. Inside the panel it sat on a
- * line of its own under the tabs, which read as an empty band.
+ * It lives out here because the page header is where it belongs — beside the
+ * order's own badges — and that header is owned by the page, not by this panel.
+ *
+ * The tint comes from the shared RETURN_STATUS_STYLES, which is what the order
+ * list badges its cards with: one status must not be amber in the list and cyan
+ * on the page it opens. It once carried its own three-way tint, which is exactly
+ * how the two drifted apart.
  */
 export function ReturnStatusBadge({ status }) {
   const { t } = useTranslation(['account']);
@@ -120,11 +123,7 @@ export function ReturnStatusBadge({ status }) {
   return (
     <span
       className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${
-        status === 'rejected'
-          ? 'bg-red-50 text-red-700 ring-red-200'
-          : status === 'refund_success'
-            ? 'bg-emerald-50 text-emerald-700 ring-emerald-200'
-            : 'bg-amber-50 text-amber-700 ring-amber-200'
+        RETURN_STATUS_STYLES[status] || 'bg-ink-100 text-ink-700 ring-ink-200'
       }`}
     >
       {t(`detail.returnSteps.${status}`)}
@@ -163,15 +162,23 @@ export default function ReturnTracker({ order }) {
             <dd className="font-semibold text-ink-800">{formatPrice(refundAmount)}</dd>
           </div>
         )}
+        {/* The courier and the reference are two different answers — who is
+            coming, and what to quote when chasing them — so they get a field
+            each. Either may be recorded without the other. */}
+        {request.pickupPartner && (
+          <div>
+            <dt className="text-xs font-medium uppercase tracking-wide text-ink-400">
+              {t('detail.returnPickupPartner')}
+            </dt>
+            <dd className="font-semibold text-ink-800">{request.pickupPartner}</dd>
+          </div>
+        )}
         {request.pickupTrackingNumber && (
           <div>
             <dt className="text-xs font-medium uppercase tracking-wide text-ink-400">
               {t('detail.returnPickupTracking')}
             </dt>
-            <dd className="font-semibold text-ink-800">
-              {request.pickupTrackingNumber}
-              {request.pickupPartner && ` · ${request.pickupPartner}`}
-            </dd>
+            <dd className="font-semibold text-ink-800">{request.pickupTrackingNumber}</dd>
           </div>
         )}
         {settled && order.refundReference && (

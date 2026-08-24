@@ -10,9 +10,18 @@ export const fetchWishlist = createAsyncThunk('wishlist/fetch', async (_, { reje
   }
 });
 
+/**
+ * <App> asks for these once the session resolves and <RealtimeProvider> asks again
+ * the moment the socket connects — both within the same tick of a signed-in boot,
+ * which was two identical requests on every authenticated page view. Concurrent
+ * callers share one request; a later reconnect, with nothing in flight, still
+ * refetches exactly as before. See the matching note in cartSlice.
+ */
+let idsInFlight = null;
 export const fetchWishlistIds = createAsyncThunk('wishlist/ids', async (_, { rejectWithValue }) => {
   try {
-    const res = await wishlistApi.ids();
+    idsInFlight = idsInFlight || wishlistApi.ids().finally(() => { idsInFlight = null; });
+    const res = await idsInFlight;
     return res.data.ids;
   } catch (err) {
     return rejectWithValue(err);

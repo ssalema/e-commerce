@@ -126,6 +126,8 @@ export default function Pagination({
           <Box
             sx={{
               ...navButtonSx,
+              // Static indicator, not a button — drop the shared hover style.
+              '&:hover': undefined,
               display: 'grid',
               placeItems: 'center',
               bgcolor: 'primary.main',

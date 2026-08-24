@@ -75,9 +75,20 @@ export default function Home() {
    * returned a moment ago was built for somebody else.
    */
   const isAuthenticated = useSelector((s) => s.auth.isAuthenticated);
+  /*
+   * …which is also why it waits for `initialising` to clear. A signed-in visitor
+   * starts every load as anonymous for as long as /auth/me is in flight, so asking
+   * before then fetched a rail built for nobody and then immediately fetched it
+   * again under the real identity — two of the most expensive requests on the site,
+   * per page view, one of whose answers was thrown away. Restoring the session costs
+   * nothing to wait for when there is no token to restore: `loadSession` gives up in
+   * the same tick, so a signed-out visitor still asks on the first frame.
+   */
+  const sessionInitialising = useSelector((s) => s.auth.initialising);
   const feed = useFetch(
     useCallback(() => productApi.homeFeed(recentIds), [recentIds]),
-    [recentIds, isAuthenticated]
+    [recentIds, isAuthenticated],
+    { enabled: !sessionInitialising }
   );
 
   // Every rail is derived from the catalogue, so any product change reshuffles them.
@@ -187,7 +198,10 @@ export default function Home() {
           message={feedError.message}
           onRetry={retryFailed}
         />
-      ) : feed.loading && !sections.length ? (
+      ) : /* `sessionInitialising` keeps the shimmer up over the gap before the fetch
+             is enabled — without it that gap renders as an empty page rather than a
+             loading one. */
+      (feed.loading || sessionInitialising) && !sections.length ? (
         <>
           <ProductCarousel title={t('home.forYou')} loading />
           <ProductCarousel title={t('home.topSelling')} loading />

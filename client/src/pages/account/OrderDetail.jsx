@@ -263,6 +263,12 @@ export default function OrderDetail() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            {/* First of the three, because it is the newest thing to have happened
+                to this order: the payment cleared and the parcel arrived days
+                before the return was raised. The order's own badges stay — the
+                return is a second journey over a parcel that was still paid for
+                and still delivered. */}
+            {hasReturn && <ReturnStatusBadge status={returnStatus} />}
             <StatusBadge status={order.paymentStatus} kind="payment" />
             <StatusBadge status={order.orderStatus} />
           </div>
@@ -316,7 +322,7 @@ export default function OrderDetail() {
 
                  The tabs run in the order the parcel travelled: the order first,
                  the return it may have started second. */
-              <div className="flex items-center justify-between gap-3 border-b border-ink-200 bg-ink-50 pr-4">
+              <div className="border-b border-ink-200 bg-ink-50">
                 <div
                   role="tablist"
                   aria-label={t('detail.orderStatus')}
@@ -344,10 +350,6 @@ export default function OrderDetail() {
                     </button>
                   ))}
                 </div>
-
-                {/* Only on the tab it describes — on the order's tab the page
-                    header's own status badges already answer the question. */}
-                {journey === 'return' && <ReturnStatusBadge status={order.returnRequest.status} />}
               </div>
             ) : (
               <h2 className="mb-4 text-base font-bold text-ink-900">{t('detail.orderStatus')}</h2>
@@ -481,6 +483,18 @@ export default function OrderDetail() {
               })}{' '}
               · {t(`common:paymentStatus.${order.paymentStatus}`, order.paymentStatus)}
             </p>
+            {/* The reference the refund was raised under, so a customer chasing
+                it with their bank has the number without asking support — but
+                only where nothing else on the page has already given it. A
+                settled return states it among its own details, and printing it
+                twice on one screen reads as two different numbers to check. A
+                refund with no return behind it — a cancelled order — has this
+                card as its only home. */}
+            {order.refundReference && returnStatus !== 'refund_success' && (
+              <p className="mt-1 text-xs text-ink-500">
+                {t('detail.refundReference', { reference: order.refundReference })}
+              </p>
+            )}
           </PriceSummary>
         </div>
       </div>

@@ -6,7 +6,7 @@ import { getAccessToken } from '../api/client';
 import { sessionExpired } from '../store/authSlice';
 
 import { EVENTS } from './events';
-import { connectSocket, disconnectSocket, getSocket } from './socket';
+import { connectSocket, disconnectSocket, getSocket, getSocketId } from './socket';
 import { RealtimeContext, useRealtimeEvent } from './useRealtime';
 
 /**
@@ -61,6 +61,9 @@ export default function RealtimeProvider({ children }) {
     EVENTS.ADMIN_NOTIFICATION,
     (payload) => {
       if (!payload?.title) return;
+      // An alert this tab caused is not news to it: the screen that made the move
+      // has already confirmed it by name. Only the other admins hear about it.
+      if (payload.originSocketId && payload.originSocketId === getSocketId()) return;
       enqueueSnackbar(`${payload.title} — ${payload.message || ''}`.trim(), {
         variant: payload.severity || 'info',
       });

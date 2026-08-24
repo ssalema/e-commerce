@@ -100,16 +100,27 @@ function localize(doc, lang) {
 const localizeAll = (docs, lang) => (Array.isArray(docs) ? docs.map((d) => localize(d, lang)) : docs);
 
 /**
+ * A ref is only worth translating once it has been populated into a document.
+ *
+ * An *un*-populated one is still an ObjectId, and an ObjectId is `typeof 'object'`,
+ * so the plain-object check this used to make let one through — and `localize`'s
+ * `{ ...doc }` then spread it into `{ buffer: { type: 'Buffer', data: [...] } }`.
+ * That is not a slower id, it is a destroyed one: the endpoints that do not populate
+ * taxonomy (home-feed, related, by-ids) were shipping a 130-byte blob in place of a
+ * 24-character id, and anything reading it got neither a name nor a usable reference.
+ * Checking `_bsontype` leaves the id alone to serialise as its own hex string.
+ */
+const isPopulated = (ref) => ref && typeof ref === 'object' && !ref._bsontype;
+
+/**
  * A product carries populated taxonomy that needs translating too, and its
  * category name is rendered on the card, the breadcrumb and the details table.
  */
 function localizeProduct(product, lang) {
   if (!product) return product;
   const out = localize(product, lang);
-  if (out.category && typeof out.category === 'object') out.category = localize(out.category, lang);
-  if (out.subCategory && typeof out.subCategory === 'object') {
-    out.subCategory = localize(out.subCategory, lang);
-  }
+  if (isPopulated(out.category)) out.category = localize(out.category, lang);
+  if (isPopulated(out.subCategory)) out.subCategory = localize(out.subCategory, lang);
   return out;
 }
 

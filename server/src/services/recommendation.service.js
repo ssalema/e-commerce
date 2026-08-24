@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { Product, Order, Cart, Wishlist } = require('../models');
+const { createTtlCache } = require('../utils/ttlCache');
 
 /**
  * The two curated homepage rails, computed instead of curated.
@@ -118,23 +119,38 @@ async function getTrending({ select, limit, exclude = [] }) {
 }
 
 /**
+ * The ranking is the same list for every visitor and it is derived from a 90-day
+ * window, so recomputing it per homepage hit buys nothing: a sale placed one minute
+ * ago cannot meaningfully reorder ninety days of them.
+ *
+ * It is cached here rather than left to the HTTP layer because the home-feed URL
+ * carries the visitor's own `?seen=` ids — every browser asks for a different URL,
+ * so `cache.catalogue` in front of the route almost never hits for this endpoint.
+ * That left an `$unwind`/`$group` over the orders collection, plus its round trip,
+ * on the critical path of every single home page load.
+ */
+const salesRankingCache = createTtlCache({ ttlMs: 60 * 1000, max: 4 });
+
+/**
  * Units shipped per product inside the window. Returns ids in rank order — the
  * documents themselves are fetched separately, because an order item is a frozen
  * snapshot and may name a product that has since been unpublished or deleted.
  */
-async function recentSalesRanking(limit) {
-  const since = new Date(Date.now() - SALES_WINDOW_DAYS * DAY_MS);
+function recentSalesRanking(limit) {
+  return salesRankingCache.resolve(String(limit), async () => {
+    const since = new Date(Date.now() - SALES_WINDOW_DAYS * DAY_MS);
 
-  const rows = await Order.aggregate([
-    { $match: { createdAt: { $gte: since }, orderStatus: { $nin: DEAD_ORDER_STATUSES } } },
-    { $unwind: '$items' },
-    { $group: { _id: '$items.product', units: { $sum: '$items.quantity' } } },
-    { $sort: { units: -1 } },
-    // Over-fetch: some of these will be unpublished by the time they are resolved.
-    { $limit: limit * 3 },
-  ]);
+    const rows = await Order.aggregate([
+      { $match: { createdAt: { $gte: since }, orderStatus: { $nin: DEAD_ORDER_STATUSES } } },
+      { $unwind: '$items' },
+      { $group: { _id: '$items.product', units: { $sum: '$items.quantity' } } },
+      { $sort: { units: -1 } },
+      // Over-fetch: some of these will be unpublished by the time they are resolved.
+      { $limit: limit * 3 },
+    ]);
 
-  return rows.map((row) => row._id).filter(Boolean);
+    return rows.map((row) => row._id).filter(Boolean);
+  });
 }
 
 /** Re-orders documents to match a ranked list of ids, dropping any that no longer resolve. */

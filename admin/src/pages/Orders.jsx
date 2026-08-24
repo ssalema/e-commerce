@@ -2,9 +2,10 @@ import { useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
-import Chip from '@mui/material/Chip';
 import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
+import Divider from '@mui/material/Divider';
+import ListSubheader from '@mui/material/ListSubheader';
 import InputAdornment from '@mui/material/InputAdornment';
 import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
@@ -24,7 +25,6 @@ import {
   ORDER_STATUSES,
   SEARCH_DEBOUNCE_MS,
   RETURN_STATUS_LABELS,
-  RETURN_STATUS_COLOR,
 } from '../utils/constants';
 import PageHeader from '../components/common/PageHeader';
 import DataTable from '../components/common/DataTable';
@@ -33,6 +33,26 @@ import ResetFiltersButton from '../components/common/ResetFiltersButton';
 import RangeSelect from '../components/dashboard/RangeSelect';
 import useRangeQuery from '../components/dashboard/useRangeQuery';
 import UpdateStatusDialog from '../components/orders/UpdateStatusDialog';
+import ReturnStatusChip from '../components/orders/ReturnStatusChip';
+
+/*
+ * Where each return status is filtered from.
+ *
+ * A return status is still not an order status — the order underneath keeps its
+ * own — but every one of them answers a question this toolbar already asks. Three
+ * are about where the parcel is (waiting on us, being collected, refused), two
+ * about where the money is; so each sits in the control that asks its question and
+ * the toolbar keeps no return control of its own. Values are prefixed, which is
+ * what lets the query builder tell the two vocabularies apart in one select.
+ */
+const RETURN_PREFIX = 'return:';
+const RETURN_BY_ORDER_STATUS = ['requested', 'out_for_pickup', 'rejected'];
+const RETURN_BY_PAYMENT = ['refund_started', 'refund_success'];
+
+/** `requested` → `return:requested`, and back — `null` for a plain status. */
+const returnValue = (status) => `${RETURN_PREFIX}${status}`;
+const returnOf = (value) =>
+  value.startsWith(RETURN_PREFIX) ? value.slice(RETURN_PREFIX.length) : null;
 
 export default function Orders() {
   const navigate = useNavigate();
@@ -40,10 +60,6 @@ export default function Orders() {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
   const [paymentStatus, setPaymentStatus] = useState('all');
-  // The returns queue. Its own filter rather than an order status, because an
-  // order keeps its own status while a return runs over it — "delivered with a
-  // return waiting on us" is not a value `orderStatus` can hold.
-  const [returnStatus, setReturnStatus] = useState('all');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
   const [updating, setUpdating] = useState(null);
@@ -54,21 +70,40 @@ export default function Orders() {
   // the Inbox tabs use, instead of the bare pair of date inputs this page once had.
   const range = useRangeQuery('all');
 
+  /*
+   * Two controls, one return question between them. A return status chosen in the
+   * order-status or payment control is a `returnStatus` to the API, and that
+   * control itself then asks nothing of the order status or payment it sits on —
+   * "Refund Started" is the whole filter, not "refund started orders that are
+   * also paid".
+   *
+   * Delivered is the one plain status that has to say something about returns:
+   * once a return is raised the order belongs to the return queue, so Delivered
+   * asks for the orders with no return on them and the parcel stops being listed
+   * in two places at once.
+   */
+  const statusReturn = returnOf(status);
+  const paymentReturn = returnOf(paymentStatus);
+  const returnQuery =
+    statusReturn || paymentReturn || (status === 'delivered' ? 'none' : 'all');
+  const statusQuery = statusReturn ? 'all' : status;
+  const paymentQuery = paymentReturn ? 'all' : paymentStatus;
+
   const query = useFetch(
     useCallback(
       () =>
         orderApi.list({
           page,
           limit,
-          status,
-          paymentStatus,
-          returnStatus,
+          status: statusQuery,
+          paymentStatus: paymentQuery,
+          returnStatus: returnQuery,
           search: debouncedSearch || undefined,
           ...range.query,
         }),
-      [page, limit, status, paymentStatus, returnStatus, debouncedSearch, range.queryKey]
+      [page, limit, statusQuery, paymentQuery, returnQuery, debouncedSearch, range.queryKey]
     ),
-    [page, limit, status, paymentStatus, returnStatus, debouncedSearch, range.queryKey]
+    [page, limit, statusQuery, paymentQuery, returnQuery, debouncedSearch, range.queryKey]
   );
 
   // New orders appear at the top of page 1 without anyone reaching for refresh.
@@ -178,14 +213,10 @@ export default function Orders() {
           {/* Stacked under the order's own status rather than replacing it: the
               order stays Delivered while a return runs over it, and both facts
               matter to whoever is working the queue. */}
-          {row.returnRequest?.status && (
-            <Chip
-              size="small"
-              label={RETURN_STATUS_LABELS[row.returnRequest.status]}
-              color={RETURN_STATUS_COLOR[row.returnRequest.status] || 'default'}
-              sx={{ fontWeight: 700, height: 20, fontSize: 11 }}
-            />
-          )}
+          <ReturnStatusChip
+            status={row.returnRequest?.status}
+            sx={{ height: 20, fontSize: 11 }}
+          />
         </Stack>
       ),
     },
@@ -241,18 +272,30 @@ export default function Orders() {
     setPage(1);
   };
 
+  /*
+   * Picking a return status in one control clears one picked in the other: the API
+   * takes a single `returnStatus`, so both naming different ones would leave one
+   * of them showing a filter that is not being applied.
+   */
+  const selectStatus = (value) => {
+    setStatus(value);
+    if (returnOf(value)) setPaymentStatus((current) => (returnOf(current) ? 'all' : current));
+    setPage(1);
+  };
+
+  const selectPayment = (value) => {
+    setPaymentStatus(value);
+    if (returnOf(value)) setStatus((current) => (returnOf(current) ? 'all' : current));
+    setPage(1);
+  };
+
   const isFiltered =
-    Boolean(search) ||
-    status !== 'all' ||
-    paymentStatus !== 'all' ||
-    returnStatus !== 'all' ||
-    !range.isDefault;
+    Boolean(search) || status !== 'all' || paymentStatus !== 'all' || !range.isDefault;
 
   const resetFilters = () => {
     setSearch('');
     setStatus('all');
     setPaymentStatus('all');
-    setReturnStatus('all');
     range.reset();
     setPage(1);
   };
@@ -320,10 +363,7 @@ export default function Orders() {
               select
               label="Order status"
               value={status}
-              onChange={(e) => {
-                setStatus(e.target.value);
-                setPage(1);
-              }}
+              onChange={(e) => selectStatus(e.target.value)}
               sx={{ minWidth: 165 }}
             >
               <MenuItem value="all">All statuses</MenuItem>
@@ -332,17 +372,27 @@ export default function Orders() {
                   {titleCase(value)}
                 </MenuItem>
               ))}
+              {/* Where the parcel is once it is coming back — the same question
+                  this control already answers, so it is answered here. Grouped
+                  below a rule because these are the return's states, not the
+                  order's: the order underneath is still Delivered. */}
+              <Divider />
+              <ListSubheader sx={{ lineHeight: 2.2, fontSize: 12, fontWeight: 700 }}>
+                Return
+              </ListSubheader>
+              {RETURN_BY_ORDER_STATUS.map((value) => (
+                <MenuItem key={value} value={returnValue(value)}>
+                  {RETURN_STATUS_LABELS[value]}
+                </MenuItem>
+              ))}
             </TextField>
 
             <TextField
               select
               label="Payment"
               value={paymentStatus}
-              onChange={(e) => {
-                setPaymentStatus(e.target.value);
-                setPage(1);
-              }}
-              sx={{ minWidth: 140 }}
+              onChange={(e) => selectPayment(e.target.value)}
+              sx={{ minWidth: 165 }}
             >
               <MenuItem value="all">All payments</MenuItem>
               {/* "Refund pending" is the queue staff work through after a
@@ -352,26 +402,15 @@ export default function Orders() {
                   {titleCase(value)}
                 </MenuItem>
               ))}
-            </TextField>
-
-            <TextField
-              select
-              label="Return"
-              value={returnStatus}
-              onChange={(e) => {
-                setReturnStatus(e.target.value);
-                setPage(1);
-              }}
-              sx={{ minWidth: 165 }}
-            >
-              <MenuItem value="all">All orders</MenuItem>
-              {/* "Any" is the whole return history; the four below are the queue
-                  itself — "Return Requested" is the one with staff waiting at the
-                  other end of it. */}
-              <MenuItem value="any">Has a return</MenuItem>
-              {Object.entries(RETURN_STATUS_LABELS).map(([value, label]) => (
-                <MenuItem key={value} value={value}>
-                  {label}
+              {/* A return's two money steps. Whoever is chasing a refund is asking
+                  a payment question, so they ask it in the payment control. */}
+              <Divider />
+              <ListSubheader sx={{ lineHeight: 2.2, fontSize: 12, fontWeight: 700 }}>
+                Return
+              </ListSubheader>
+              {RETURN_BY_PAYMENT.map((value) => (
+                <MenuItem key={value} value={returnValue(value)}>
+                  {RETURN_STATUS_LABELS[value]}
                 </MenuItem>
               ))}
             </TextField>

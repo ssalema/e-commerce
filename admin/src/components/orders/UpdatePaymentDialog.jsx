@@ -91,7 +91,7 @@ export default function UpdatePaymentDialog({ order, onClose, onUpdated }) {
 
           <TextField
             fullWidth
-            label="Refund reference"
+            label="Refund reference number"
             value={refundReference}
             onChange={(e) => setRefundReference(e.target.value)}
             helperText="Optional — the gateway or bank reference to quote if the customer chases it"

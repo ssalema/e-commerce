@@ -16,7 +16,23 @@ const call = (name, fn) =>
     }
   });
 
-export const fetchCart = call('fetch', () => cartApi.get());
+/**
+ * Two things ask for the cart on a signed-in boot and they do it within the same
+ * tick: <App> once the session resolves, and <RealtimeProvider> the moment the
+ * socket reports connected (which is there to catch up on writes missed while the
+ * tab was away). Both are correct on their own; together they were two identical
+ * requests on every authenticated page view.
+ *
+ * Single-flight rather than a `condition` guard, so the second caller still gets a
+ * fulfilled thunk with the same cart instead of being silently dropped — and so a
+ * genuine later reconnect, when nothing is in flight, still refetches as before.
+ * Same shape as the refresh-token queueing in api/client.js.
+ */
+let cartInFlight = null;
+export const fetchCart = call('fetch', () => {
+  cartInFlight = cartInFlight || cartApi.get().finally(() => { cartInFlight = null; });
+  return cartInFlight;
+});
 export const addToCart = call('add', (payload) => cartApi.addItem(payload));
 export const updateCartItem = call('update', ({ itemId, quantity }) => cartApi.updateItem(itemId, quantity));
 export const removeCartItem = call('remove', (itemId) => cartApi.removeItem(itemId));

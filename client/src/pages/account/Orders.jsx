@@ -41,20 +41,38 @@ const NEXT_STATUS = {
   out_for_delivery: 'delivered',
 };
 
+/**
+ * The same idea for the return's own journey: the step a running return waits
+ * for, so a returning order can promise its next update instead of restating the
+ * state its chip already shows.
+ *
+ * `refund_success` and `rejected` are absent — both are endings, and the card
+ * names them outright rather than promising an update that will never arrive.
+ */
+const NEXT_RETURN_STATUS = {
+  requested: 'out_for_pickup',
+  out_for_pickup: 'refund_started',
+  refund_started: 'refund_success',
+};
+
 export default function Orders() {
   const { t } = useTranslation(['account', 'common']);
   const [status, setStatus] = useState('all');
   const [page, setPage] = useState(1);
 
   // "returns" is asked as ?returnStatus=any — every order carrying a return,
-  // whatever the order status underneath it says.
+  // whatever the order status underneath it says. "Delivered" is asked as its
+  // mirror image: ?returnStatus=none, so an order that has started a return
+  // leaves the delivered list for the returns one rather than sitting in both.
   const { data, loading, error, refetch } = useFetch(
     useCallback(
       () =>
         orderApi.list(
           status === 'returns'
             ? { returnStatus: 'any', page, limit: 8 }
-            : { status, page, limit: 8 }
+            : status === 'delivered'
+              ? { status, returnStatus: 'none', page, limit: 8 }
+              : { status, page, limit: 8 }
         ),
       [status, page]
     ),
@@ -205,13 +223,28 @@ export default function Orders() {
                   {order.returnRequest?.status ? (
                     /* A return in progress is the only thing still happening to
                        this order, so it takes the line that would otherwise
-                       report a delivery that is already several days old. */
-                    <p className="text-xs font-medium text-ink-600">
-                      {t('detail.returnStatusHeading')}:{' '}
-                      <span className="font-semibold">
+                       report a delivery that is already several days old — and it
+                       says it the way an order still in flight does, by naming the
+                       step yet to come rather than repeating the state the chip
+                       above already shows. A finished return has nothing left to
+                       promise, so there the line names the ending instead. */
+                    NEXT_RETURN_STATUS[order.returnRequest.status] ? (
+                      <p className="text-xs text-ink-500">
+                        {t('orders.willNotify', {
+                          status: t(
+                            `detail.returnSteps.${NEXT_RETURN_STATUS[order.returnRequest.status]}`
+                          ).toLowerCase(),
+                        })}
+                      </p>
+                    ) : (
+                      <p
+                        className={`text-xs font-medium ${
+                          order.returnRequest.status === 'rejected' ? 'text-danger' : 'text-success'
+                        }`}
+                      >
                         {t(`detail.returnSteps.${order.returnRequest.status}`)}
-                      </span>
-                    </p>
+                      </p>
+                    )
                   ) : order.orderStatus === 'delivered' && order.deliveredAt ? (
                     <p className="text-xs font-medium text-success">
                       {t('orders.deliveredOn', { date: formatDate(order.deliveredAt) })}
