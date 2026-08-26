@@ -3,6 +3,7 @@ import {
   ORDER_STATUS_COLOR,
   PAYMENT_STATUS_COLOR,
   PRODUCT_STATUS_COLOR,
+  RETURN_STATUS_COLOR,
 } from '../../utils/constants';
 import { titleCase } from '../../utils/format';
 
@@ -10,6 +11,12 @@ const PALETTES = {
   order: ORDER_STATUS_COLOR,
   payment: PAYMENT_STATUS_COLOR,
   product: PRODUCT_STATUS_COLOR,
+  /**
+   * The return's own ladder. A second journey over the same parcel, but still a
+   * status of that order — so it is badged by this component like the rest, and
+   * ReturnStatusChip is only the wrapper that supplies its proper label.
+   */
+  return: RETURN_STATUS_COLOR,
   /**
      * Four states, two of them the customer's own doing. 'deactivated' is warning
      * rather than error because nothing has gone wrong — someone left — and

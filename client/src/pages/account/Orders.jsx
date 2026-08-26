@@ -6,7 +6,6 @@ import useFetch from '../../hooks/useFetch';
 import { useLiveRefetch } from '../../realtime/useRealtime';
 import { ORDER_EVENTS } from '../../realtime/events';
 import { formatDate, formatPrice, optimisedImage } from '../../utils/format';
-import { RETURN_STATUS_STYLES } from '../../utils/constants';
 import Seo from '../../components/common/Seo';
 import Icon from '../../components/common/Icon';
 import StatusBadge from '../../components/common/StatusBadge';
@@ -174,18 +173,13 @@ export default function Orders() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* Its own chip rather than a fourth order status: the order is
+                  {/* Its own badge rather than a fourth order status: the order is
                       still `delivered` while a return runs, and overwriting that
-                      would lose the fact that the parcel did arrive. */}
+                      would lose the fact that the parcel did arrive. Drawn by the
+                      same component as the two beside it, so it reads as one more
+                      status of this order and not as a label of another kind. */}
                   {order.returnRequest?.status && (
-                    <span
-                      className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${
-                        RETURN_STATUS_STYLES[order.returnRequest.status] ||
-                        'bg-ink-100 text-ink-700 ring-ink-200'
-                      }`}
-                    >
-                      {t(`detail.returnSteps.${order.returnRequest.status}`)}
-                    </span>
+                    <StatusBadge status={order.returnRequest.status} kind="return" />
                   )}
                   <StatusBadge status={order.paymentStatus} kind="payment" />
                   <StatusBadge status={order.orderStatus} />

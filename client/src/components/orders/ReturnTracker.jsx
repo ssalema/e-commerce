@@ -2,8 +2,9 @@ import { useTranslation } from 'react-i18next';
 
 import Icon from '../common/Icon';
 import Timeline from './Timeline';
+import StatusBadge from '../common/StatusBadge';
 import { formatPrice } from '../../utils/format';
-import { RETURN_STATUS_STEPS, RETURN_STATUS_STYLES } from '../../utils/constants';
+import { RETURN_STATUS_STEPS } from '../../utils/constants';
 
 /**
  * The three lines of small print in the reference design's "Please Note" card.
@@ -112,23 +113,15 @@ function returnRows(request, t) {
  * It lives out here because the page header is where it belongs — beside the
  * order's own badges — and that header is owned by the page, not by this panel.
  *
- * The tint comes from the shared RETURN_STATUS_STYLES, which is what the order
- * list badges its cards with: one status must not be amber in the list and cyan
- * on the page it opens. It once carried its own three-way tint, which is exactly
- * how the two drifted apart.
+ * It is StatusBadge underneath, as `return` — the same pill the Paid and
+ * Delivered badges beside it are drawn as, down to the shape and the shared
+ * tints. It once carried its own three-way tint over hand-written utilities,
+ * which is exactly how it drifted from both of them.
  */
-export function ReturnStatusBadge({ status }) {
-  const { t } = useTranslation(['account']);
+export function ReturnStatusBadge({ status, className = '' }) {
+  if (!status) return null;
 
-  return (
-    <span
-      className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset ${
-        RETURN_STATUS_STYLES[status] || 'bg-ink-100 text-ink-700 ring-ink-200'
-      }`}
-    >
-      {t(`detail.returnSteps.${status}`)}
-    </span>
-  );
+  return <StatusBadge status={status} kind="return" className={`shrink-0 ${className}`} />;
 }
 
 export default function ReturnTracker({ order }) {

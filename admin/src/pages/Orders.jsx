@@ -213,10 +213,10 @@ export default function Orders() {
           {/* Stacked under the order's own status rather than replacing it: the
               order stays Delivered while a return runs over it, and both facts
               matter to whoever is working the queue. */}
-          <ReturnStatusChip
-            status={row.returnRequest?.status}
-            sx={{ height: 20, fontSize: 11 }}
-          />
+          {/* Full size, like the status above it: shrinking it made the return
+              read as an annotation on the order status rather than a status in
+              its own right. */}
+          <ReturnStatusChip status={row.returnRequest?.status} />
         </Stack>
       ),
     },

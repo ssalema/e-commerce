@@ -1,42 +1,27 @@
-import Chip from '@mui/material/Chip';
-
-import { RETURN_STATUS_LABELS, RETURN_STATUS_TINTS } from '../../utils/constants';
+import StatusChip from '../common/StatusChip';
+import { RETURN_STATUS_LABELS } from '../../utils/constants';
 
 /**
- * A return's state, as a pill — the panel's copy of the storefront's return
- * badge, down to the tint.
+ * A return's state, badged as every other status in the panel is.
  *
- * It is its own component rather than three `<Chip color={…}>` calls because the
- * orders list, the order page and the update dialog all show this same fact, and
- * the three had already drifted into looking like different things. One place to
- * draw it is what keeps them the same picture — and the same picture the customer
- * is looking at.
+ * It is StatusChip underneath — same shape, size, radius, weight and padding as
+ * the Delivered and Refunded chips it stands beside — and adds only the two
+ * things that are particular to a return: its proper label ("Refund Success",
+ * not the titlecased key) and the null check, since most orders have no return
+ * to badge.
  *
- * Deliberately not StatusChip: that one names a colour from the MUI palette,
- * which is a different set of five from the storefront's return tints.
+ * The wrapper exists so the orders list, the order page and the update dialog
+ * cannot drift apart the way three separate `<Chip>` calls once did.
  */
-export default function ReturnStatusChip({ status, sx, ...rest }) {
+export default function ReturnStatusChip({ status, ...rest }) {
   if (!status) return null;
 
-  const tint = RETURN_STATUS_TINTS[status];
-
   return (
-    <Chip
-      size="small"
-      variant="filled"
+    <StatusChip
+      status={status}
+      kind="return"
       label={RETURN_STATUS_LABELS[status] || status}
       {...rest}
-      sx={{
-        fontWeight: 700,
-        bgcolor: tint?.bg || 'action.hover',
-        color: tint?.text || 'text.secondary',
-        // The storefront draws its ring inside the pill; an inset border is the
-        // nearest thing here, and it is what keeps a pale tint legible against
-        // the equally pale row it sits on.
-        border: 1,
-        borderColor: tint?.ring || 'divider',
-        ...sx,
-      }}
     />
   );
 }
