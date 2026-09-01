@@ -1169,9 +1169,12 @@ const trackerColumns = (order) => {
    * cancellation described a journey that will never happen, and beside a red
    * bead they read as steps still pending rather than steps abandoned.
    *
-   * An order cancelled while it was still `pending` reached no column at all;
-   * the first one is kept, muted, so the rail has something to run into and the
-   * red bead is never a lone mark floating across the full width.
+   * An order that reached no column at all is kept on its first one, muted, so
+   * the rail has something to run into and the red bead is never a lone mark
+   * floating across the full width. Newly cancelled orders cannot land here —
+   * cancellation now starts at `confirmed`, so at least one column is always
+   * walked — but orders cancelled from `pending` before that rule existed are
+   * still in the database and still get mailed about.
    */
   const walked = cancelled ? columns.filter((column) => column.state !== 'todo') : columns;
   const path = cancelled && !walked.length ? columns.slice(0, 1) : walked;

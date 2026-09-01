@@ -491,6 +491,13 @@ module.exports = {
     body('message').trim().isLength({ min: 2, max: 3000 }).withMessage('Write a reply before sending'),
   ],
 
+  // The inbox's bulk bar acts on the rows ticked on one page, so the ceiling is the
+  // largest page size the list endpoint will serve.
+  inquiryBulkRules: [
+    body('ids').isArray({ min: 1, max: 100 }).withMessage('Select at least one message'),
+    body('ids.*').isMongoId().withMessage('Invalid message id'),
+  ],
+
   // The careers form posts multipart/form-data, so every value arrives as a string.
   jobApplicationRules: [
     body('name').trim().isLength({ min: 2, max: 80 }).withMessage('Please enter your full name'),

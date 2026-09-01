@@ -75,6 +75,61 @@ export function ProductGridPageSkeleton({ count = 10, columns = PRODUCT_GRID_COL
   );
 }
 
+/**
+ * The order confirmation: banner, the three-cell summary strip, the payment note,
+ * the items and the actions — one card, the same `max-w-3xl py-10` frame the page
+ * itself uses, so the chunk placeholder, the fetch and the order all sit in the
+ * same place.
+ */
+export function OrderSuccessSkeleton() {
+  return (
+    <div className="container-page max-w-3xl py-10">
+      <div className="card overflow-hidden">
+        <div className="flex flex-col items-center bg-ink-100 px-6 py-10">
+          <Skeleton className="mb-4 h-16 w-16 rounded-full bg-ink-200" />
+          <Skeleton className="h-8 w-64 max-w-full bg-ink-200" />
+          <Skeleton className="mt-2 h-4 w-72 max-w-full bg-ink-200" />
+        </div>
+
+        <div className="grid gap-px bg-ink-100 sm:grid-cols-3">
+          {[0, 1, 2].map((cell) => (
+            <div key={cell} className="flex flex-col items-center bg-white px-5 py-4">
+              <Skeleton className="h-3 w-20" />
+              <Skeleton className="mt-1.5 h-4 w-28" />
+            </div>
+          ))}
+        </div>
+
+        <div className="p-6">
+          <Skeleton className="mb-5 h-16 w-full rounded-lg" />
+          <Skeleton className="mb-3 h-4 w-24" />
+
+          <div className="divide-y divide-ink-100">
+            {[0, 1].map((item) => (
+              <div key={item} className="flex gap-3 py-3">
+                <Skeleton className="h-16 w-16 shrink-0 rounded-lg" />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Skeleton className="h-3.5 w-3/5" />
+                  <Skeleton className="h-3 w-1/4" />
+                </div>
+                <Skeleton className="h-4 w-16 shrink-0" />
+              </div>
+            ))}
+          </div>
+
+          <Skeleton className="mt-5 h-20 w-full rounded-lg" />
+
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+            {[0, 1, 2].map((action) => (
+              <Skeleton key={action} className="h-11 flex-1 rounded-lg" />
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ListRowSkeleton({ rows = 4 }) {
   return (
     <div className="space-y-3">

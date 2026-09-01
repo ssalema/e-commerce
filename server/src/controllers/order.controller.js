@@ -454,10 +454,14 @@ exports.cancelOrder = asyncHandler(async (req, res) => {
     throw ApiError.forbidden('You cannot cancel this order');
   }
   if (!CUSTOMER_CANCELLABLE.includes(order.orderStatus)) {
+    // `pending` sits *before* the window rather than after it, so it gets its own
+    // sentence — "already pending" would read as though the order had moved on.
     throw ApiError.badRequest(
       order.orderStatus === 'cancelled'
         ? 'This order has already been cancelled'
-        : `This order is already ${order.orderStatus.replace(/_/g, ' ')} and can no longer be cancelled online. Please contact support for help.`
+        : order.orderStatus === 'pending'
+          ? 'This order is still waiting on its payment and has not been placed yet, so there is nothing to cancel.'
+          : `This order is already ${order.orderStatus.replace(/_/g, ' ')} and can no longer be cancelled online. Please contact support for help.`
     );
   }
 
@@ -773,28 +777,33 @@ exports.updateOrderStatus = asyncHandler(async (req, res) => {
   }
 
   /*
-   * An order with a return already running has to be closed *through* that
-   * return, not around it. Marking it `returned` from the status dialog would
-   * restock the goods and close the order while the request still said
-   * "requested" — a shopper watching their tracker would see it frozen at step
-   * one with the money already moving. The return ladder does all of that at
-   * `refund_started`, so this points staff at it instead.
+   * An order is never marked `returned` from this dialog — STATUS_FLOW has no
+   * edge into it, and this catches the one case that slips past that check: a
+   * re-submit on an order already sitting at `returned`, which would restock
+   * the goods a second time.
    *
-   * A `returned` move on an order that never had a request is left alone: that
-   * is the pre-existing manual path, for a return handled off-system.
+   * Returns are closed *through* the return request, which at `refund_started`
+   * restocks, releases the coupon, queues the refund and moves the order — all
+   * the things a bare status change would miss, plus a tracker the shopper can
+   * actually watch. A return handled off-system needs a request raised for it,
+   * so that it goes through that same machinery.
    */
-  if (status === 'returned' && RETURN_OPEN.includes(order.returnRequest?.status)) {
+  if (status === 'returned') {
     throw ApiError.badRequest(
-      'This order has a return in progress. Close it from the Return request card — marking it returned here would leave the customer\'s return tracker out of step with their refund.'
+      RETURN_OPEN.includes(order.returnRequest?.status)
+        ? 'This order has a return in progress. Close it from the Return request card — marking it returned here would leave the customer\'s return tracker out of step with their refund.'
+        : 'An order is marked returned by closing its return request, not from here. Raise a return request for this order and take it to Refund started — that is what restocks the items and queues the refund.'
     );
   }
 
   // A staff cancellation quotes the same picklist the storefront offers when the
   // admin picked from it, and falls back to whatever they typed in the note.
+  // Only cancellations reach here — `returned` is refused above, and the return
+  // ladder does its own restocking at `refund_started`.
   let historyNote = note;
-  if (status === 'cancelled' || status === 'returned') {
-    // A return restocks the SKU that came back, not the product in general — a returned
-    // Black/M must never make Blue/L look available.
+  if (status === 'cancelled') {
+    // Released against the exact SKU each line reserved — a cancelled Black/M
+    // must never make Blue/L look available.
     await Promise.all(order.items.map((item) => releaseStock(item)));
     // The coupon goes back too, on the same terms as a shopper cancellation.
     await releaseForOrder(order);
@@ -803,7 +812,7 @@ exports.updateOrderStatus = asyncHandler(async (req, res) => {
     order.cancelledAt = new Date();
     order.cancellationReason = reasonId
       ? await resolveCancellationReason({ reasonId })
-      : note || `Marked ${status} by admin`;
+      : note || 'Cancelled by admin';
     order.cancelledBy = 'admin';
     order.cancelledByUser = req.user._id;
     historyNote = order.cancellationReason;
@@ -823,8 +832,8 @@ exports.updateOrderStatus = asyncHandler(async (req, res) => {
   await order.save();
 
   broadcast.orderStatusChanged(order, historyNote);
-  if (status === 'cancelled' || status === 'returned') {
-    broadcast.stockChanged(order.items, { reason: `order_${status}` });
+  if (status === 'cancelled') {
+    broadcast.stockChanged(order.items, { reason: 'order_cancelled' });
   }
 
   if (order.user?.email) {

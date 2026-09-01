@@ -3,8 +3,9 @@ const mongoose = require('mongoose');
 /**
  * A named, monotonically increasing sequence.
  *
- * `_id` is the sequence key. Order numbers use one bucket per calendar month
- * ("order:2608"), so the running number restarts at 1 when the month rolls over.
+ * `_id` is the sequence key. Order numbers use one bucket per financial year
+ * ("order:fy:2627" for 1 Apr 2026 – 31 Mar 2027), so the running number restarts
+ * at 1 on 1 April and nowhere else.
  */
 const counterSchema = new mongoose.Schema(
   {

@@ -13,9 +13,30 @@ import { consumeWelcomePending } from '../i18n/welcomePrompt';
 import Seo from '../components/common/Seo';
 import HeroSlider from '../components/home/HeroSlider';
 import CategoryStrip from '../components/home/CategoryStrip';
-import ProductCarousel from '../components/product/ProductCarousel';
+import ProductSection from '../components/product/ProductSection';
 import ErrorState from '../components/common/ErrorState';
 import SectionError from '../components/common/SectionError';
+
+/**
+ * How each band continues past the ten products the feed sends with the page: the
+ * filter and sort "Load more" pages through.
+ *
+ * These are module-level constants because <ProductSection> treats a new `moreQuery`
+ * as a new band and resets what it has paged in; rebuilding the object per render
+ * would throw the shopper's "load more" away on every re-render.
+ *
+ * "For You" is personalised and has no paginated equivalent, so it continues from
+ * the closest honest thing: what is selling.
+ */
+const SECTION_QUERIES = {
+  for_you: { sort: 'popular' },
+  top_selling: { sort: 'popular' },
+  new_arrivals: { sort: 'newest' },
+  best_deals: { minDiscount: 10, sort: 'discount' },
+  top_rated: { sort: 'rating' },
+};
+
+const DEFAULT_SECTION_QUERY = { sort: 'newest' };
 
 /**
  * The home page is three independent loads — banners, the category taxonomy and the
@@ -203,8 +224,8 @@ export default function Home() {
              loading one. */
       (feed.loading || sessionInitialising) && !sections.length ? (
         <>
-          <ProductCarousel title={t('home.forYou')} loading />
-          <ProductCarousel title={t('home.topSelling')} loading />
+          <ProductSection title={t('home.forYou')} loading />
+          <ProductSection title={t('home.topSelling')} loading />
         </>
       ) : (
         sections.map((section) => (
@@ -212,17 +233,11 @@ export default function Home() {
             {/* The API sends a stable `key` plus English copy; the heading itself is
                 interface text, so it is translated here and the server's title is
                 only the fallback. */}
-            <ProductCarousel
+            <ProductSection
               title={t(`home.sections.${section.key}.title`, section.title)}
               subtitle={t(`home.sections.${section.key}.subtitle`, section.subtitle)}
               products={section.products}
-              viewAllTo={
-                section.key === 'best_deals'
-                  ? '/products?minDiscount=10&sort=discount'
-                  : section.key === 'top_selling'
-                    ? '/products?sort=popular'
-                    : '/products?sort=newest'
-              }
+              moreQuery={SECTION_QUERIES[section.key] || DEFAULT_SECTION_QUERY}
             />
           </div>
         ))
@@ -231,8 +246,11 @@ export default function Home() {
       {/* The quietest band on the page: it is a convenience built from ids this
           browser already had, so a failure just leaves it out rather than asking
           the shopper to do anything about it. */}
+      {/* Grid like every band above it — the homepage reads as one layout rather
+          than a grid page with one rail left over. It has no `moreQuery` because the
+          list is finite by definition: it is what this browser remembers. */}
       {recentProducts.length > 0 && (
-        <ProductCarousel
+        <ProductSection
           title={t('home.recentlyViewed')}
           subtitle={t('home.recentlyViewedSubtitle')}
           products={recentProducts}

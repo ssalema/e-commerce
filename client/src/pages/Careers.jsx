@@ -28,6 +28,19 @@ const EMPTY = {
 const MAX_RESUME_BYTES = 5 * 1024 * 1024;
 const RESUME_PATTERN = /\.(pdf|doc|docx)$/i;
 
+/*
+ * The band that closes the page, in place of the storefront trust strip the footer
+ * shows everywhere else: on a careers page, what we sell matters less than what it
+ * is like to work here. It borrows the strip's own layout so the swap is invisible
+ * — the same four-up row in the same slot, only the content changes.
+ */
+const VALUES = [
+  { icon: 'briefcase', key: 'growth' },
+  { icon: 'heart', key: 'culture' },
+  { icon: 'star', key: 'impact' },
+  { icon: 'rocket', key: 'innovation' },
+];
+
 const PERKS = [
   { icon: 'trendingUp', key: 'growth' },
   { icon: 'users', key: 'culture' },
@@ -372,6 +385,25 @@ export default function Careers() {
           </aside>
         </div>
       </div>
+
+      {/* ---------------- What we stand for ---------------- */}
+      <section className="mt-12 border-t border-ink-200 bg-ink-50">
+        <div className="container-page grid grid-cols-2 gap-6 py-8 lg:grid-cols-4">
+          {VALUES.map((value) => (
+            <div key={value.key} className="flex items-start gap-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-brand-50 text-brand-600">
+                <Icon name={value.icon} size={19} />
+              </span>
+              <div>
+                <p className="text-sm font-semibold text-ink-900">
+                  {t(`careers.values.${value.key}Title`)}
+                </p>
+                <p className="text-xs text-ink-500">{t(`careers.values.${value.key}Text`)}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
 
       <SuccessDialog
         open={done}

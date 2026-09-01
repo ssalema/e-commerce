@@ -10,25 +10,6 @@
  * the language by name.
  */
 
-const Wheel = () => (
-  <>
-    <circle cx="32" cy="20" r="13" />
-    <circle cx="32" cy="20" r="4.5" />
-    {Array.from({ length: 8 }).map((_, i) => {
-      const angle = (Math.PI / 4) * i;
-      return (
-        <line
-          key={i}
-          x1={32 + Math.cos(angle) * 4.5}
-          y1={20 + Math.sin(angle) * 4.5}
-          x2={32 + Math.cos(angle) * 13}
-          y2={20 + Math.sin(angle) * 13}
-        />
-      );
-    })}
-  </>
-);
-
 const LANDMARKS = {
   /* English — a globe, since the language belongs to no single region. */
   globe: (
@@ -114,45 +95,6 @@ const LANDMARKS = {
       <path d="M27 31c0-8 1-13 5-13s5 5 5 13" />
       <path d="M28.5 14.5L24 20M35.5 14.5L40 20" />
       <path d="M29 24h6" />
-    </>
-  ),
-
-  /* Odia — Konark sun-temple chariot wheel. */
-  konarkWheel: <Wheel />,
-
-  /* Malayalam — a Kerala houseboat on the backwaters. */
-  houseboat: (
-    <>
-      <path d="M10 28c4 4 36 4 42 0" />
-      <path d="M16 26v-3c0-3.5 4.5-6 13-6s13 2.5 13 6v3" />
-      <path d="M52 28l5-6" />
-      <path d="M20 22h18" />
-      <path d="M10 33h14M30 33h12M46 33h8" />
-    </>
-  ),
-
-  /* Punjabi — the Golden Temple, Amritsar. */
-  goldenTemple: (
-    <>
-      <path d="M8 32h48M12 36h12M32 36h14" />
-      <path d="M20 32v-7h24v7" />
-      <path d="M25 25V16h14v9" />
-      <path d="M26 16c0-5 2.7-8 6-8s6 3 6 8M32 8V5" />
-      <path d="M21 25v-4.5M43 25v-4.5" />
-      <path d="M19 20.5c0-2 1.3-3 2-3s2 1 2 3M41 20.5c0-2 1.3-3 2-3s2 1 2 3" />
-    </>
-  ),
-
-  /* Assamese — the one-horned rhino of Kaziranga. */
-  rhino: (
-    <>
-      <path d="M14 29c-2-6 1-11 8-12.5 5-1 11-1 14.5 1C40 19 42 22 42 26" />
-      <path d="M42 27c2.5-1 4.5-3.5 4.5-6.5 0-2.5-1.5-3.5-3.5-3.5" />
-      <path d="M45.5 18.5c0-3 1-4.5 2.5-4.5" />
-      <path d="M38 17c0-2 1-3.5 2.5-3.5" />
-      <path d="M18 29v4M25 30v3M34 30v3M40 28v4" />
-      <path d="M26 18.5c1 6 1 9.5 0 12.5" />
-      <circle cx="41.5" cy="21" r=".9" />
     </>
   ),
 };

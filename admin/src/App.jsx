@@ -3,14 +3,13 @@ import { RouterProvider } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
 import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
-import Box from '@mui/material/Box';
-import CircularProgress from '@mui/material/CircularProgress';
 import { SnackbarProvider } from 'notistack';
 
 import theme from './theme';
 import { router } from './routes';
 import { loadSession, sessionExpired } from './store/authSlice';
 import RealtimeProvider from './realtime/RealtimeProvider';
+import BootSkeleton from './components/common/BootSkeleton';
 import useOverlayScrollGuard from './hooks/useOverlayScrollGuard';
 
 export default function App() {
@@ -40,13 +39,7 @@ export default function App() {
       >
         {/* Inside SnackbarProvider — the realtime layer raises the new-order alerts. */}
         <RealtimeProvider>
-          <Suspense
-            fallback={
-              <Box sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
-                <CircularProgress />
-              </Box>
-            }
-          >
+          <Suspense fallback={<BootSkeleton />}>
             <RouterProvider router={router} />
           </Suspense>
         </RealtimeProvider>

@@ -1,5 +1,6 @@
 import Skeleton, {
   ListRowSkeleton,
+  OrderSuccessSkeleton,
   ProductDetailSkeleton,
   ProductGridPageSkeleton,
 } from './Skeleton';
@@ -66,7 +67,9 @@ export default function RouteSkeleton({ pathname = '' }) {
 
   if (path.startsWith('/product/')) return <ProductDetailSkeleton />;
 
-  if (path === '/cart' || path === '/checkout' || path.startsWith('/order-success/')) {
+  if (path.startsWith('/order-success/')) return <OrderSuccessSkeleton />;
+
+  if (path === '/cart' || path === '/checkout') {
     return (
       <div className="container-page py-6">
         <ListRowSkeleton rows={3} />

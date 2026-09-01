@@ -74,6 +74,9 @@ Desktop.ini
 # Rendered email previews (scripts/email-preview.js)
 .email-preview/
 
+# Rendered invoice previews (scripts/invoice-preview.js)
+.invoice-preview/
+
 # Scratch Files
 scratch/
 scratch_*

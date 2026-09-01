@@ -61,6 +61,7 @@ exports.listInquiries = asyncHandler(async (req, res) => {
 
   if (req.query.status === 'unread') filter.isRead = false;
   else if (req.query.status === 'read') filter.isRead = true;
+  else if (req.query.status === 'starred') filter.isStarred = true;
 
   const sort = req.query.sort === 'oldest' ? { createdAt: 1 } : { createdAt: -1 };
 
@@ -161,6 +162,59 @@ exports.setInquiryRead = asyncHandler(async (req, res) => {
   broadcast.inquiryChanged('read', inquiry);
 
   return sendSuccess(res, { message: inquiry.isRead ? 'Marked as read' : 'Marked as unread', data: { inquiry } });
+});
+
+/** PATCH /inquiries/:id/star (admin)  { isStarred } */
+exports.setInquiryStarred = asyncHandler(async (req, res) => {
+  const inquiry = await Inquiry.findById(req.params.id);
+  if (!inquiry) throw ApiError.notFound('Message not found');
+
+  inquiry.isStarred = req.body.isStarred !== false;
+  inquiry.starredAt = inquiry.isStarred ? new Date() : undefined;
+  await inquiry.save();
+
+  broadcast.inquiryChanged('starred', inquiry);
+
+  return sendSuccess(res, {
+    message: inquiry.isStarred ? 'Message starred' : 'Star removed',
+    data: { inquiry },
+  });
+});
+
+/**
+ * PATCH /inquiries/bulk/read (admin)  { ids, isRead }
+ * The selection is a set of rows the admin ticked, so ids that no longer exist —
+ * deleted from another tab meanwhile — are simply not counted rather than failing
+ * the whole batch.
+ */
+exports.bulkSetInquiryRead = asyncHandler(async (req, res) => {
+  const isRead = req.body.isRead !== false;
+
+  const { modifiedCount } = await Inquiry.updateMany(
+    { _id: { $in: req.body.ids }, isRead: !isRead },
+    isRead ? { $set: { isRead: true, readAt: new Date() } } : { $set: { isRead: false }, $unset: { readAt: 1 } }
+  );
+
+  if (modifiedCount) broadcast.inquiryChanged('read', null);
+
+  return sendSuccess(res, {
+    message: modifiedCount
+      ? `${modifiedCount} ${modifiedCount === 1 ? 'message' : 'messages'} marked as ${isRead ? 'read' : 'unread'}`
+      : `Nothing to mark as ${isRead ? 'read' : 'unread'}`,
+    data: { modified: modifiedCount },
+  });
+});
+
+/** POST /inquiries/bulk/delete (admin)  { ids } */
+exports.bulkDeleteInquiries = asyncHandler(async (req, res) => {
+  const { deletedCount } = await Inquiry.deleteMany({ _id: { $in: req.body.ids } });
+
+  if (deletedCount) broadcast.inquiryChanged('deleted', null);
+
+  return sendSuccess(res, {
+    message: `${deletedCount} ${deletedCount === 1 ? 'message' : 'messages'} deleted`,
+    data: { deleted: deletedCount },
+  });
 });
 
 /**

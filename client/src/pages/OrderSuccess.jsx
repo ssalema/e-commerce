@@ -9,7 +9,7 @@ import { formatPrice, formatDate, optimisedImage } from '../utils/format';
 import { getAccessToken } from '../api/client';
 import Seo from '../components/common/Seo';
 import Icon from '../components/common/Icon';
-import Spinner from '../components/common/Spinner';
+import { OrderSuccessSkeleton } from '../components/common/Skeleton';
 import ErrorState from '../components/common/ErrorState';
 
 export default function OrderSuccess() {
@@ -49,13 +49,7 @@ export default function OrderSuccess() {
     URL.revokeObjectURL(url);
   };
 
-  if (loading) {
-    return (
-      <div className="grid min-h-[60vh] place-items-center">
-        <Spinner size={34} className="text-brand-600" />
-      </div>
-    );
-  }
+  if (loading) return <OrderSuccessSkeleton />;
 
   if (error || !order) {
     return (

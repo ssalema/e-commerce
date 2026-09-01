@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useSnackbar } from 'notistack';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -6,10 +6,14 @@ import TextField from '@mui/material/TextField';
 import MenuItem from '@mui/material/MenuItem';
 import InputAdornment from '@mui/material/InputAdornment';
 import IconButton from '@mui/material/IconButton';
+import Button from '@mui/material/Button';
 import Tooltip from '@mui/material/Tooltip';
 import SearchIcon from '@mui/icons-material/Search';
 import VisibilityIcon from '@mui/icons-material/VisibilityOutlined';
 import DeleteIcon from '@mui/icons-material/DeleteOutline';
+import StarIcon from '@mui/icons-material/Star';
+import StarBorderIcon from '@mui/icons-material/StarBorder';
+import MarkEmailReadIcon from '@mui/icons-material/MarkEmailReadOutlined';
 
 import { inquiryApi } from '../../api/endpoints';
 import useFetch from '../../hooks/useFetch';
@@ -35,6 +39,19 @@ const SORTS = [
 const DEFAULT_FILTERS = { search: '', status: 'all', sort: 'newest' };
 
 /**
+ * The header checkbox's dropdown. Every option is a way of ticking the rows already
+ * on screen, so it answers "which of these?" rather than filtering the list — that
+ * question the Status field beside the search box already answers.
+ */
+const SELECT_PRESETS = [
+  { value: 'all', label: 'All', divider: true },
+  { value: 'read', label: 'Read', match: (row) => row.isRead },
+  { value: 'unread', label: 'Unread', match: (row) => !row.isRead },
+  { value: 'starred', label: 'Starred', match: (row) => row.isStarred },
+  { value: 'unstarred', label: 'Unstarred', match: (row) => !row.isStarred },
+];
+
+/**
  * The contact-form inbox: search / date / sort, plus view and delete. Replying is
  * reached by opening a message — the reader sees what they are answering first.
  */
@@ -48,6 +65,10 @@ export default function ContactMessagesTab({ onCountsChanged }) {
   const [viewing, setViewing] = useState(null);
   const [replying, setReplying] = useState(null);
   const [deleting, setDeleting] = useState(null);
+
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkWorking, setBulkWorking] = useState(false);
 
   // Typing in the search box shouldn't fire a request per keystroke.
   const search = useDebounce(filters.search, SEARCH_DEBOUNCE_MS);
@@ -75,6 +96,16 @@ export default function ContactMessagesTab({ onCountsChanged }) {
 
   const inquiries = query.data?.data?.inquiries || [];
   const meta = query.data?.meta;
+
+  // A tick stands for a row on screen, so anything that moves the rows — a new page,
+  // a narrower filter — retires the selection with them.
+  useEffect(() => {
+    setSelectedIds([]);
+  }, [page, limit, search, filters.status, filters.sort, range.queryKey]);
+
+  /* A live refetch can delete a ticked row out from under the selection; only ids
+     still on the page are ever acted on. */
+  const selection = selectedIds.filter((id) => inquiries.some((row) => row._id === id));
 
   const refresh = () => {
     query.refetch();
@@ -129,6 +160,50 @@ export default function ContactMessagesTab({ onCountsChanged }) {
     }
   };
 
+  /** Starring is a bookmark, not a read receipt — it leaves the NEW badge alone. */
+  const toggleStar = async (row) => {
+    try {
+      await inquiryApi.setStarred(row._id, !row.isStarred);
+      query.refetch();
+    } catch (err) {
+      enqueueSnackbar(err.message || 'Could not update the star', { variant: 'error' });
+    }
+  };
+
+  const bulkMarkRead = async () => {
+    setBulkWorking(true);
+    try {
+      const res = await inquiryApi.bulkSetRead(selection, true);
+      enqueueSnackbar(res.message || 'Messages marked as read', { variant: 'success' });
+      setSelectedIds([]);
+      refresh();
+    } catch (err) {
+      enqueueSnackbar(err.message || 'Could not mark the messages as read', { variant: 'error' });
+    } finally {
+      setBulkWorking(false);
+    }
+  };
+
+  const bulkRemove = async () => {
+    let res;
+    try {
+      res = await inquiryApi.bulkRemove(selection);
+    } catch (err) {
+      enqueueSnackbar(err.message || 'Could not delete the messages', { variant: 'error' });
+      return;
+    }
+    enqueueSnackbar(res.message || 'Messages deleted', { variant: 'success' });
+    setSelectedIds([]);
+    // Clearing a whole page past the first would otherwise leave the reader looking
+    // at a page that no longer exists.
+    if (selection.length === inquiries.length && page > 1) {
+      setPage(page - 1);
+      onCountsChanged?.();
+    } else {
+      refresh();
+    }
+  };
+
   const columns = [
     {
       key: 'name',
@@ -170,9 +245,28 @@ export default function ContactMessagesTab({ onCountsChanged }) {
       key: 'actions',
       label: 'Action',
       align: 'center',
-      width: 110,
+      // The width the Careers tab gives its own three-button row.
+      width: 130,
       render: (row) => (
         <Stack direction="row" spacing={0.25} justifyContent="center">
+          {/* First of the three: the one action that changes nothing but the reader's
+              own shortlist, so it sits ahead of read-and-delete. */}
+          <Tooltip title={row.isStarred ? 'Remove star' : 'Star this message'}>
+            <IconButton
+              size="small"
+              /* `text.disabled` is what this panel paints inert things; an empty star
+                 is a live control, so it stays a quiet slate next to its two coloured
+                 neighbours and only turns amber once it means something. */
+              sx={{ color: row.isStarred ? 'warning.main' : 'text.secondary' }}
+              onClick={() => toggleStar(row)}
+            >
+              {row.isStarred ? (
+                <StarIcon fontSize="small" />
+              ) : (
+                <StarBorderIcon fontSize="small" />
+              )}
+            </IconButton>
+          </Tooltip>
           <Tooltip title="View message">
             <IconButton size="small" color="primary" onClick={() => open(row)}>
               <VisibilityIcon fontSize="small" />
@@ -230,6 +324,8 @@ export default function ContactMessagesTab({ onCountsChanged }) {
         <MenuItem value="all">All messages</MenuItem>
         <MenuItem value="unread">Unread</MenuItem>
         <MenuItem value="read">Read</MenuItem>
+        {/* Without this the stars would only be findable by scrolling for them. */}
+        <MenuItem value="starred">Starred</MenuItem>
       </TextField>
 
       <TextField
@@ -268,6 +364,33 @@ export default function ContactMessagesTab({ onCountsChanged }) {
           setPage(1);
         }}
         toolbar={toolbar}
+        selectable
+        selectedIds={selectedIds}
+        onSelectionChange={setSelectedIds}
+        selectPresets={SELECT_PRESETS}
+        bulkActions={
+          <>
+            <Button
+              size="small"
+              variant="contained"
+              startIcon={<MarkEmailReadIcon fontSize="small" />}
+              disabled={bulkWorking}
+              onClick={bulkMarkRead}
+            >
+              Mark as Read
+            </Button>
+            <Button
+              size="small"
+              variant="contained"
+              color="error"
+              startIcon={<DeleteIcon fontSize="small" />}
+              disabled={bulkWorking}
+              onClick={() => setBulkDeleting(true)}
+            >
+              Delete Selected
+            </Button>
+          </>
+        }
         emptyTitle={isFiltered ? 'No messages match these filters' : 'No messages yet'}
         emptyMessage={
           isFiltered
@@ -303,6 +426,15 @@ export default function ContactMessagesTab({ onCountsChanged }) {
         onConfirm={remove}
         title="Delete this message?"
         message={`The inquiry from ${deleting?.name || 'this visitor'} will be removed permanently.`}
+        confirmLabel="Delete"
+      />
+
+      <ConfirmDialog
+        open={bulkDeleting}
+        onClose={() => setBulkDeleting(false)}
+        onConfirm={bulkRemove}
+        title={`Delete ${selection.length} ${selection.length === 1 ? 'message' : 'messages'}?`}
+        message="The selected inquiries will be removed permanently."
         confirmLabel="Delete"
       />
     </>

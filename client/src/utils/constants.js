@@ -45,11 +45,13 @@ export const ORDER_STATUS_STEPS = [
 
 /**
  * How far a shopper may cancel on their own — mirrors CUSTOMER_CANCELLABLE in
- * server/src/models/Order.js. Once the parcel is with a courier the button stays
- * on screen but explains itself instead of cancelling; the endpoint enforces the
- * same window, so this list only decides what the page says.
+ * server/src/models/Order.js. An order awaiting its payment ('pending') has not
+ * been accepted yet and so has nothing to cancel; once the parcel is with a
+ * courier the button stays on screen but explains itself instead of cancelling.
+ * The endpoint enforces the same window, so this list only decides what the page
+ * says.
  */
-export const CUSTOMER_CANCELLABLE_STATUSES = ['pending', 'confirmed', 'packed'];
+export const CUSTOMER_CANCELLABLE_STATUSES = ['confirmed', 'packed'];
 
 /** Statuses that end an order — nothing follows them on the timeline. */
 export const ORDER_CLOSED_STATUSES = ['cancelled', 'returned'];

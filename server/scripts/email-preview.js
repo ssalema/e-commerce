@@ -403,29 +403,6 @@ const CASES = [
         }),
       }),
   },
-  {
-    file: 'order-status-cancelled-early',
-    group: 'Orders',
-    label: 'Status — cancelled before confirmation',
-    note: 'Nothing reached: one muted column carries the rail into the red one',
-    run: (mail) =>
-      mail.sendOrderStatusEmail({
-        ...CUSTOMER,
-        order: orderAt('cancelled', {
-          // An online order sits at `pending` until the payment lands, and it can
-          // be cancelled from there — so the tracker has to hold up with no step
-          // behind it at all.
-          statusHistory: [
-            { status: 'pending', changedAt: ago(2), actor: 'customer' },
-            { status: 'cancelled', changedAt: ago(2), actor: 'admin' },
-          ],
-          paymentStatus: 'pending',
-          cancelledAt: ago(2),
-          cancelledBy: 'admin',
-          cancellationReason: 'payment was not completed in time.',
-        }),
-      }),
-  },
   ...[
     ['requested', 'Return — requested', 'Return tracker replaces the fulfilment row, on step 1'],
     ['out_for_pickup', 'Return — out for pickup', 'Pickup courier and tracking attached'],
@@ -455,24 +432,6 @@ const CASES = [
             rejectionReason: 'The ear cup damage appears to have occurred after delivery.',
             history: [...RETURN_HISTORY.slice(0, 2), { status: 'rejected', changedAt: ago(0) }],
           },
-        }),
-      }),
-  },
-  {
-    file: 'order-status-returned',
-    group: 'Orders',
-    label: 'Status — returned (no request)',
-    note: 'A return handled off-system — the order tracker still closes red',
-    run: (mail) =>
-      mail.sendOrderStatusEmail({
-        ...CUSTOMER,
-        order: orderAt('returned', {
-          statusHistory: [...historyUpTo('delivered'), { status: 'returned', changedAt: ago(0) }],
-          paymentStatus: 'refunded',
-          deliveredAt: ago(3),
-          cancelledAt: ago(0),
-          cancelledBy: 'admin',
-          cancellationReason: 'the headphones arrived with a damaged ear cup.',
         }),
       }),
   },

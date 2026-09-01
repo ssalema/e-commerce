@@ -211,12 +211,16 @@ export default function OrderDetail() {
   }
 
   const canCancel = CUSTOMER_CANCELLABLE_STATUSES.includes(order.orderStatus);
-  // Offered up to delivery; past `packed` it explains why it can't be used.
-  // A delivered order has arrived and a closed one has ended, so neither has
-  // anything left to cancel — there the button goes away rather than explaining
-  // itself.
+  // Offered from confirmation up to delivery; past `packed` it explains why it
+  // can't be used. A delivered order has arrived and a closed one has ended, so
+  // neither has anything left to cancel — there the button goes away rather than
+  // explaining itself. `pending` goes the same way for the opposite reason: the
+  // order has not been placed yet, so there is nothing to cancel and nothing
+  // support could do about it either.
   const showCancel =
-    order.orderStatus !== 'delivered' && !ORDER_CLOSED_STATUSES.includes(order.orderStatus);
+    order.orderStatus !== 'pending' &&
+    order.orderStatus !== 'delivered' &&
+    !ORDER_CLOSED_STATUSES.includes(order.orderStatus);
   const invoiceAvailable = order.paymentStatus === 'paid' || order.paymentMethod === 'cod';
 
   /*

@@ -26,6 +26,11 @@ const inquirySchema = new mongoose.Schema(
     isRead: { type: Boolean, default: false, index: true },
     readAt: Date,
 
+    // An admin's own bookmark. Independent of `isRead`: starring is what the reader
+    // wants to come back to, reading is what the inbox has already been shown.
+    isStarred: { type: Boolean, default: false, index: true },
+    starredAt: Date,
+
     reply: {
       message: { type: String, trim: true, maxlength: 3000 },
       sentAt: Date,
@@ -46,8 +51,9 @@ const inquirySchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// The inbox is always "newest first", optionally narrowed to unread.
+// The inbox is always "newest first", optionally narrowed to unread or starred.
 inquirySchema.index({ createdAt: -1 });
 inquirySchema.index({ isRead: 1, createdAt: -1 });
+inquirySchema.index({ isStarred: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Inquiry', inquirySchema);

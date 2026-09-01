@@ -12,15 +12,3 @@ export default function Spinner({ size = 20, className = '' }) {
     />
   );
 }
-
-/** Full-page loader used as the Suspense fallback while a route chunk downloads. */
-export function PageLoader({ label }) {
-  const { t } = useTranslation();
-
-  return (
-    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 text-ink-400">
-      <Spinner size={34} className="text-brand-600" />
-      <p className="text-sm font-medium">{label || t('actions.loading')}</p>
-    </div>
-  );
-}

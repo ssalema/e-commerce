@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { Trans, useTranslation } from 'react-i18next';
 import toast from 'react-hot-toast';
 
@@ -171,6 +171,11 @@ function PaymentMark({ type, t }) {
 
 export default function Footer() {
   const { t } = useTranslation();
+  const { pathname } = useLocation();
+
+  // Careers closes with its own band of company values, so the storefront trust
+  // strip would only stack a second four-up row of icons underneath it.
+  const showTrust = !pathname.startsWith('/careers');
 
   // Brand, address, phone, email and social profiles are all admin-managed.
   const { general, social, siteName, commerce, loading: settingsLoading } = useSettings();
@@ -206,24 +211,28 @@ export default function Footer() {
   const placeUrl = mapPlaceUrl(general);
 
   return (
-    <footer className="mt-12 border-t border-ink-200 bg-white">
-      <div className="border-b border-ink-200 bg-ink-50">
-        <div className="container-page grid grid-cols-2 gap-6 py-8 lg:grid-cols-4">
-          {TRUST_POINTS.map((point) => (
-            <div key={point.key} className="flex items-start gap-3">
-              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-brand-50 text-brand-600">
-                <Icon name={point.icon} size={19} />
-              </span>
-              <div>
-                <p className="text-sm font-semibold text-ink-900">
-                  {t(`footer.trust.${point.key}Title`)}
-                </p>
-                <p className="text-xs text-ink-500">{t(`footer.trust.${point.key}Text`, { days: commerce.returnWindowDays })}</p>
+    /* Careers supplies its own band above, which already carries the gap and the
+       top rule, so the footer meets it flush there. */
+    <footer className={`border-t border-ink-200 bg-white ${showTrust ? 'mt-12' : ''}`}>
+      {showTrust && (
+        <div className="border-b border-ink-200 bg-ink-50">
+          <div className="container-page grid grid-cols-2 gap-6 py-8 lg:grid-cols-4">
+            {TRUST_POINTS.map((point) => (
+              <div key={point.key} className="flex items-start gap-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-brand-50 text-brand-600">
+                  <Icon name={point.icon} size={19} />
+                </span>
+                <div>
+                  <p className="text-sm font-semibold text-ink-900">
+                    {t(`footer.trust.${point.key}Title`)}
+                  </p>
+                  <p className="text-xs text-ink-500">{t(`footer.trust.${point.key}Text`, { days: commerce.returnWindowDays })}</p>
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="container-page grid gap-10 py-12 sm:grid-cols-2 lg:grid-cols-12">
         {/* ---------------- Brand + contact + social ---------------- */}

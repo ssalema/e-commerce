@@ -15,10 +15,6 @@ const SUPPORTED_LANGUAGES = [
   'mr', // Marathi
   'bn', // Bengali
   'gu', // Gujarati
-  'or', // Odia
-  'ml', // Malayalam
-  'pa', // Punjabi
-  'as', // Assamese
 ];
 
 const DEFAULT_LANGUAGE = 'en';

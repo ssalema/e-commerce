@@ -2,11 +2,11 @@ import { Suspense, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import Box from '@mui/material/Box';
 import Toolbar from '@mui/material/Toolbar';
-import LinearProgress from '@mui/material/LinearProgress';
 import Sidebar, { DRAWER_WIDTH } from './Sidebar';
 import Topbar from './Topbar';
 import ScrollManager from './ScrollManager';
 import ErrorBoundary from '../common/ErrorBoundary';
+import RouteSkeleton from '../common/RouteSkeleton';
 import { InquiryCountsProvider } from '../../hooks/useInquiryCounts';
 
 export default function AdminLayout() {
@@ -39,7 +39,7 @@ export default function AdminLayout() {
           {/* Keyed by path so navigating away from a crashed page clears the error
               and the sidebar/topbar stay usable while a page is broken. */}
           <ErrorBoundary key={pathname}>
-            <Suspense fallback={<LinearProgress sx={{ mt: 2, borderRadius: 1 }} />}>
+            <Suspense fallback={<RouteSkeleton pathname={pathname} />}>
               <Outlet />
             </Suspense>
           </ErrorBoundary>

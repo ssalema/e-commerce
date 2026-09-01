@@ -97,7 +97,14 @@ async function resolveRefs(Model, raw) {
 const parsePaging = (query, defaultLimit = 12) => {
   const page = Math.max(1, Number(query.page) || 1);
   const limit = Math.min(60, Math.max(1, Number(query.limit) || defaultLimit));
-  return { page, limit, skip: (page - 1) * limit };
+  /*
+   * An explicit `offset` wins over `page`. The homepage rails load 10 rows and then
+   * 15 at a time, so every batch after the first starts at a row number that is not
+   * a multiple of any page size — expressing that as a page is not possible.
+   */
+  const offset = Number(query.offset);
+  const skip = Number.isFinite(offset) && offset >= 0 ? Math.floor(offset) : (page - 1) * limit;
+  return { page, limit, skip };
 };
 
 /* ------------------------------------------------------------------ */

@@ -75,6 +75,16 @@
       "learningTitle": "Learn & Develop",
       "learningText": "Continuous learning and skill development."
     },
+    "values": {
+      "growthTitle": "Growth",
+      "growthText": "We believe in your personal & professional growth.",
+      "cultureTitle": "Culture",
+      "cultureText": "A collaborative and inclusive work environment.",
+      "impactTitle": "Impact",
+      "impactText": "Build solutions that create real impact for millions.",
+      "innovationTitle": "Innovation",
+      "innovationText": "Work with the latest technologies and innovative ideas."
+    },
     "errors": {
       "position": "Select the position you are applying for",
       "experience": "Select your experience level",

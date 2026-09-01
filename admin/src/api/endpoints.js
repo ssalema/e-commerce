@@ -149,8 +149,12 @@ export const inquiryApi = {
   // Reading one also marks it read, which is what refreshes the unread tile.
   detail: (id) => api.get(`/inquiries/${id}`),
   setRead: (id, isRead) => api.patch(`/inquiries/${id}/read`, { isRead }),
+  setStarred: (id, isStarred) => api.patch(`/inquiries/${id}/star`, { isStarred }),
   reply: (id, message) => api.post(`/inquiries/${id}/reply`, { message }),
   remove: (id) => api.delete(`/inquiries/${id}`),
+  // The bulk bar's two actions, over the ids ticked on the current page.
+  bulkSetRead: (ids, isRead) => api.patch('/inquiries/bulk/read', { ids, isRead }),
+  bulkRemove: (ids) => api.post('/inquiries/bulk/delete', { ids }),
 };
 
 export const newsletterApi = {

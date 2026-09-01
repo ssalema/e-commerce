@@ -14,19 +14,32 @@ const ORDER_STATUSES = [
 ];
 
 /**
- * Legal forward transitions. Orders may be cancelled up to (and including)
- * "out_for_delivery"; after delivery only a return is possible.
+ * Legal forward transitions. Orders may be cancelled from "confirmed" up to (and
+ * including) "out_for_delivery". Delivery is the end of this ladder.
+ *
+ * `delivered` has no move out of it. A returned order does reach `returned`, but
+ * never through here: it gets there along the return ladder, at the
+ * `refund_started` step that has the goods back in hand — see RETURN_STATUSES.
+ * There is no manual "mark it returned" for a return handled off-system; a return
+ * that happened is a return request, so that it restocks, refunds and shows the
+ * shopper a tracker like any other.
+ *
+ * `pending` is deliberately not cancellable. It is the state a prepaid order sits
+ * in before its payment lands — nothing has been accepted, no money has moved and
+ * no fulfilment has begun, so there is nothing there to cancel. Such an order
+ * either becomes `confirmed` when the payment verifies, or is never confirmed at
+ * all; `paymentStatus` carries the `failed` outcome on its own.
  *
  * This is the *staff* ladder. A shopper cancelling from the storefront is held to
  * the narrower window below — see CUSTOMER_CANCELLABLE.
  */
 const STATUS_FLOW = {
-  pending: ['confirmed', 'cancelled'],
+  pending: ['confirmed'],
   confirmed: ['packed', 'cancelled'],
   packed: ['shipped', 'cancelled'],
   shipped: ['out_for_delivery', 'cancelled'],
   out_for_delivery: ['delivered', 'cancelled'],
-  delivered: ['returned'],
+  delivered: [],
   cancelled: [],
   returned: [],
 };
@@ -35,12 +48,17 @@ const STATUS_FLOW = {
  * The statuses where nobody is still waiting on anything — the set account
  * deactivation is gated on.
  *
- * Not derived from STATUS_FLOW's leaves, because `delivered` is not one: a
- * delivered order can still become `returned`. That edge is a *new* decision the
- * customer may or may not take, not an outstanding obligation of ours — the
- * parcel arrived, which is the whole of what "still in progress" was asking
- * about. `returned` sits here for the mirror-image reason: it is only reachable
- * from `delivered`, so an order carrying it has been through the entire journey.
+ * These are STATUS_FLOW's three leaves, but the list is spelled out rather than
+ * derived, because the two ideas only coincide — "nothing follows on the staff
+ * ladder" and "nobody is waiting on anything" are different questions, and a
+ * later status could easily answer them differently.
+ *
+ * `delivered` belongs here even though a return may still follow it: a return is
+ * a *new* decision the customer may or may not take, not an outstanding
+ * obligation of ours — the parcel arrived, which is the whole of what "still in
+ * progress" was asking about. `returned` sits here for the mirror-image reason:
+ * it is only reached once the goods are back with us, so an order carrying it has
+ * been through the entire journey.
  */
 const SETTLED_STATUSES = ['delivered', 'cancelled', 'returned'];
 
@@ -48,14 +66,18 @@ const SETTLED_STATUSES = ['delivered', 'cancelled', 'returned'];
 const OPEN_STATUSES = ORDER_STATUSES.filter((status) => !SETTLED_STATUSES.includes(status));
 
 /**
- * How far a shopper may cancel on their own: up to, but not including, the moment
- * the parcel leaves the warehouse. Once it is with a courier the money and the
- * goods are both in motion, and stopping that is a support decision — staff keep
- * the wider window STATUS_FLOW allows, because they can actually recall a parcel.
+ * How far a shopper may cancel on their own: from the moment the order is
+ * accepted, up to but not including the moment the parcel leaves the warehouse.
+ * Once it is with a courier the money and the goods are both in motion, and
+ * stopping that is a support decision — staff keep the wider window STATUS_FLOW
+ * allows, because they can actually recall a parcel.
+ *
+ * `pending` is excluded for the reason given on STATUS_FLOW: an order still
+ * waiting on its payment has not been accepted, so there is nothing to cancel.
  *
  * Both front-ends mirror this list; the cancel endpoint is what enforces it.
  */
-const CUSTOMER_CANCELLABLE = ['pending', 'confirmed', 'packed'];
+const CUSTOMER_CANCELLABLE = ['confirmed', 'packed'];
 
 /** Who ended an order. Recorded on the order and on the history entry alike. */
 const CANCELLED_BY = ['customer', 'admin'];
@@ -387,12 +409,24 @@ orderSchema.virtual('returnStatus').get(function returnStatus() {
 });
 
 /**
- * ORD<yy><mm><5 digit serial> — "ORD260800001" is the first order of Aug 2026.
+ * The Indian financial year an instant falls in, as its two two-digit years:
+ * "2627" for 1 Apr 2026 – 31 Mar 2027. Jan–Mar belong to the year before.
+ */
+function financialYearCode(date) {
+  const month = date.getMonth(); // 0-based, so 3 is April
+  const startYear = month >= 3 ? date.getFullYear() : date.getFullYear() - 1;
+  return `${String(startYear).slice(2)}${String(startYear + 1).slice(2)}`;
+}
+
+/**
+ * ORD<fy><5 digit serial> — "ORD262700001" is the first order of FY 2026-27,
+ * which runs 1 Apr 2026 to 31 Mar 2027.
  *
- * The serial is a per-month counter, so it is the running order count for the
- * month rather than an opaque id: readable over the phone, sortable as text, and
- * it tells staff at a glance where in the month an order sits. The invoice takes
- * the same serial under an INV prefix, keeping the pair obviously related.
+ * The serial is a per-financial-year counter, so it is the running order count
+ * for the year rather than an opaque id: readable over the phone, sortable as
+ * text, and it lines the numbering up with the books, so a year's orders are a
+ * contiguous run at audit time. The invoice takes the same serial under an INV
+ * prefix, keeping the pair obviously related.
  *
  * The counter is claimed inside whatever session the save is running under, so a
  * checkout that aborts (out of stock, payment never started) returns its number.
@@ -401,13 +435,12 @@ orderSchema.pre('validate', async function assignNumbers(next) {
   if (!this.isNew || this.orderNumber) return next();
 
   try {
-    const now = new Date();
-    const ym = `${String(now.getFullYear()).slice(2)}${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const seq = await Counter.next(`order:${ym}`, this.$session());
+    const fy = financialYearCode(new Date());
+    const seq = await Counter.next(`order:fy:${fy}`, this.$session());
     const serial = String(seq).padStart(5, '0');
 
-    this.orderNumber = `ORD${ym}${serial}`;
-    this.invoiceNumber = `INV${ym}${serial}`;
+    this.orderNumber = `ORD${fy}${serial}`;
+    this.invoiceNumber = `INV${fy}${serial}`;
     return next();
   } catch (err) {
     return next(err);
