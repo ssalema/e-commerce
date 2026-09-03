@@ -188,10 +188,28 @@ export default function Modal({ open, onClose, title, children, footer, size = '
           </div>
         )}
 
-        <div className="max-h-[70vh] overflow-y-auto px-5 py-4">{children}</div>
+        {/*
+          * A dialog whose only way out is the header X carries no footer, so the
+          * body is the panel's bottom edge and has to close the shape itself —
+          * at py-4 the last line sits tighter to the edge than a footered dialog
+          * ever does, and the two read as different components. The extra pb
+          * gives it the same optical bottom the footer bar provides, and picks
+          * up the home-indicator inset the sheet form needs when the panel is
+          * flush with the screen edge (env() is 0 everywhere else).
+          */}
+        <div
+          className={`max-h-[70vh] overflow-y-auto px-5 pt-4 ${
+            footer ? 'pb-4' : 'pb-[calc(1.5rem+env(safe-area-inset-bottom))]'
+          }`}
+        >
+          {children}
+        </div>
 
         {footer && (
-          <div className="flex justify-end gap-3 border-t border-ink-200 bg-ink-50 px-5 py-3.5">
+          <div
+            className="flex justify-end gap-3 border-t border-ink-200 bg-ink-50 px-5 pt-3.5
+                       pb-[calc(0.875rem+env(safe-area-inset-bottom))]"
+          >
             {footer}
           </div>
         )}

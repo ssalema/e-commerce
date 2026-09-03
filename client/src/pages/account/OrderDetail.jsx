@@ -588,11 +588,6 @@ export default function OrderDetail() {
         onClose={() => setDialog(null)}
         title={t('detail.cancelBlockedTitle')}
         size="sm"
-        footer={
-          <button type="button" onClick={() => setDialog(null)} className="btn-primary">
-            {t('common:actions.close')}
-          </button>
-        }
       >
         <div className="flex items-start gap-3">
           <Icon name="info" size={18} className="mt-0.5 shrink-0 text-danger" />

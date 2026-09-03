@@ -18,7 +18,7 @@ import StatusBadge from '../common/StatusBadge';
  * to the page where it can be tracked or cancelled.
  */
 export default function PendingOrdersDialog({ open, onClose, orders = [] }) {
-  const { t } = useTranslation(['account', 'common']);
+  const { t } = useTranslation('account');
 
   return (
     <Modal
@@ -26,14 +26,9 @@ export default function PendingOrdersDialog({ open, onClose, orders = [] }) {
       onClose={onClose}
       title={t('settings.pendingOrdersTitle')}
       footer={
-        <>
-          <button type="button" onClick={onClose} className="btn-outline">
-            {t('common:actions.close')}
-          </button>
-          <Link to="/account/orders" className="btn-primary">
-            {t('settings.pendingOrdersAction')}
-          </Link>
-        </>
+        <Link to="/account/orders" className="btn-primary">
+          {t('settings.pendingOrdersAction')}
+        </Link>
       }
     >
       <div className="space-y-4">
