@@ -2,23 +2,33 @@
  * Renders the order invoice in src/services/invoice.service.js to a PDF you can
  * open, without touching an order and without an HTTP request.
  *
- *   node scripts/invoice-preview.js          # render, then print the file path
- *   node scripts/invoice-preview.js --open   # ...and open it in the viewer
+ *   node scripts/invoice-preview.js          # render, then print the file paths
+ *   node scripts/invoice-preview.js --open   # ...and open them in the viewer
  *   node scripts/invoice-preview.js --no-db  # skip Mongo; use env fallback branding
  *
  * Nothing about the document is duplicated here. The script hands the real
  * `streamInvoice` a response object that writes to a file instead of a socket,
- * and calls it with one fixture — so a preview can never drift from the PDF a
+ * and calls it with fixtures — so a preview can never drift from the PDF a
  * shopper downloads.
  *
- * One fixture, deliberately. Everything the layout can put on the page is on it:
- * the three-row payment panel with a gateway reference, a coupon deduction, a
- * delivery charge, the savings line under the summary, item rows with and
- * without a variant and with and without a thumbnail — and enough lines that the table
- * breaks, so the continuation masthead on page two and the footer pinned to the
- * foot of both pages are on show as well. The states this order cannot also be —
- * cash on delivery, refunded, an online order whose gateway reference was never
- * recorded — only ever take a row away from what you see here.
+ * Two renderings of one order, differing only in how many lines it has, because
+ * the length is the one thing that changes the shape of the page:
+ *
+ *   invoice.pdf         every line — the table breaks, so the continuation sheet
+ *                       and its missing masthead are on show, and the summary
+ *                       and closing blocks sit on a second page
+ *   invoice-1-page.pdf  the first three lines — everything closes on one sheet,
+ *                       which is what puts the footer's fixed position and the
+ *                       white space above it under the eye
+ *
+ * Everything else is shared, so a difference between the two files is a
+ * pagination decision and nothing else. Between them they carry everything the
+ * layout can put on a page: the three-row payment panel with a gateway
+ * reference, a coupon deduction, a delivery charge, the savings line under the
+ * summary, and item rows with and without a variant and with and without a
+ * thumbnail. The states this order cannot also be — cash on delivery, refunded,
+ * an online order whose gateway reference was never recorded — only ever take a
+ * row away from what you see here.
  */
 
 const fs = require('fs');
@@ -28,7 +38,6 @@ const { execFile } = require('child_process');
 const env = require('../src/config/env');
 
 const OUT_DIR = path.join(__dirname, '../.invoice-preview');
-const OUT_FILE = path.join(OUT_DIR, 'invoice.pdf');
 
 const args = process.argv.slice(2);
 const useDb = !args.includes('--no-db');
@@ -214,26 +223,32 @@ const items = [
   },
 ];
 
-const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
-
 /**
- * The item table sums to `subtotal` — every line billed at its discounted
- * selling price — and from there the coupon is the only deduction:
- * `subtotal − couponDiscount + shipping = total`. `mrpTotal` and `discount` are
- * the display pair, the pre-discount original and the saving already inside
- * `subtotal`, so they sit outside that sum.
+ * The pricing for a given set of lines, derived from them rather than written
+ * out: the item table sums to `subtotal`, and from there the coupon is the only
+ * deduction — `subtotal − couponDiscount + shipping = total`. `mrpTotal` and
+ * `discount` are the display pair, the pre-discount original and the saving
+ * already inside `subtotal`, so they sit outside that sum.
+ *
+ * Derived, because the two fixtures hold different lines: a hand-written
+ * subtotal would agree with one of them and quietly lie on the other.
  */
-const pricing = {
-  mrpTotal: subtotal + 3200,
-  subtotal,
-  discount: 3200,
-  couponDiscount: 500,
-  couponCode: 'WELCOME500',
-  shipping: 79,
-  total: subtotal - 500 + 79,
+const pricingFor = (lines) => {
+  const subtotal = lines.reduce((sum, item) => sum + item.lineTotal, 0);
+  // A quarter off the MRP, so the savings line has something to say on both.
+  const discount = Math.round(subtotal / 3);
+  return {
+    mrpTotal: subtotal + discount,
+    subtotal,
+    discount,
+    couponDiscount: 500,
+    couponCode: 'WELCOME500',
+    shipping: 79,
+    total: subtotal - 500 + 79,
+  };
 };
 
-const order = {
+const orderWith = (lines) => ({
   _id: '6631f0a2c4d5e6f70123abcd',
   orderNumber: 'ORD2627000418',
   invoiceNumber: 'INV2627000418',
@@ -246,10 +261,19 @@ const order = {
   // The Payment document the controller populates onto the order. Only its
   // `razorpayPaymentId` is read — it is the transaction id on the payment panel.
   payment: { razorpayPaymentId: 'pay_QeR8kZ2mTv91Lx' },
-  items,
-  pricing,
+  items: lines,
+  pricing: pricingFor(lines),
   shippingAddress: address,
-};
+});
+
+/**
+ * The two renderings. Same order, different lengths — the only variable that
+ * changes the shape of the page.
+ */
+const CASES = [
+  { file: 'invoice.pdf', label: 'every line — the table breaks onto a second sheet', lines: items },
+  { file: 'invoice-1-page.pdf', label: 'three lines — everything closes on one sheet', lines: items.slice(0, 3) },
+];
 
 /* ------------------------------------------------------------------ *
  * Main
@@ -263,34 +287,45 @@ async function main() {
 
   fs.mkdirSync(OUT_DIR, { recursive: true });
 
-  const res = fileResponse(OUT_FILE);
-  // streamInvoice returns as soon as it has called doc.end(); the bytes are
-  // still draining into the file, so the size below has to wait for `finish`.
-  const written = new Promise((resolve, reject) => {
-    res.on('finish', resolve);
-    res.on('error', reject);
-  });
-
-  await streamInvoice(order, res);
-  await written;
-
-  const kb = Math.round(fs.statSync(OUT_FILE).size / 1024);
-  const disposition = /filename="([^"]+)"/.exec(res.getHeader('content-disposition') || '');
-  const filename = disposition ? disposition[1] : path.basename(OUT_FILE);
   const branding = connected ? 'live Organization settings' : 'env fallback';
+  const written = [];
 
-  console.log(`\n  ✓ ${filename} — ${kb} KB, branding: ${branding}\n  → ${OUT_FILE}\n`);
+  // Sequentially: the second run reuses the branding the first one resolved, and
+  // racing them to render two A4 pages buys nothing worth the tangle.
+  for (const preview of CASES) {
+    const out = path.join(OUT_DIR, preview.file);
+    const res = fileResponse(out);
+    // streamInvoice returns as soon as it has called doc.end(); the bytes are
+    // still draining into the file, so the size below has to wait for `finish`.
+    const drained = new Promise((resolve, reject) => {
+      res.on('finish', resolve);
+      res.on('error', reject);
+    });
+
+    await streamInvoice(orderWith(preview.lines), res);
+    await drained;
+
+    const kb = Math.round(fs.statSync(out).size / 1024);
+    console.log(`  ✓ ${preview.file} — ${preview.label} (${kb} KB)`);
+    written.push(out);
+  }
+
+  console.log(`\n  ${written.length} previews, branding: ${branding}`);
+  written.forEach((out) => console.log(`  → ${out}`));
+  console.log();
 
   if (connected) await require('mongoose').disconnect();
   if (shouldOpen) {
     // `start` is a cmd builtin, hence the shell; `open`/`xdg-open` are binaries.
-    const opener =
-      process.platform === 'win32'
-        ? ['cmd', ['/c', 'start', '', OUT_FILE]]
-        : process.platform === 'darwin'
-          ? ['open', [OUT_FILE]]
-          : ['xdg-open', [OUT_FILE]];
-    execFile(opener[0], opener[1]);
+    written.forEach((out) => {
+      const opener =
+        process.platform === 'win32'
+          ? ['cmd', ['/c', 'start', '', out]]
+          : process.platform === 'darwin'
+            ? ['open', [out]]
+            : ['xdg-open', [out]];
+      execFile(opener[0], opener[1]);
+    });
   }
 }
 

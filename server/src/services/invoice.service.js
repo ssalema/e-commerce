@@ -1046,14 +1046,15 @@ const SIGNATURE = 'This is a computer-generated invoice and does not require a p
 function footLine(doc, page, pages, note = '') {
   doc.font('Helvetica').fontSize(7).fillColor(P.ink400);
   if (note) doc.text(note, LEFT, PAGE_FOOT_TEXT, { width: WIDTH, align: 'center', lineBreak: false });
-  // A page count on a one-page invoice answers a question nobody asked.
-  if (pages > 1) {
-    doc.text(`Page ${page} of ${pages}`, LEFT, PAGE_FOOT_TEXT, {
-      width: WIDTH,
-      align: 'right',
-      lineBreak: false,
-    });
-  }
+  // Printed on every invoice, a one-page one included. "Page 1 of 1" is not
+  // noise on a document that gets printed and filed: it is the line that says
+  // nothing came after it, and its absence is what makes a reader wonder
+  // whether a second sheet went missing.
+  doc.text(`Page ${page} of ${pages}`, LEFT, PAGE_FOOT_TEXT, {
+    width: WIDTH,
+    align: 'right',
+    lineBreak: false,
+  });
 }
 
 /**
