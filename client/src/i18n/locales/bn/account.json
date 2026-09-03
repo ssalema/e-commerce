@@ -73,6 +73,8 @@
     "placedOn": "{{date}} তারিখে দেওয়া হয়েছে",
     "downloadInvoice": "চালান ডাউনলোড করুন",
     "invoiceUnavailable": "চালান এখনও উপলব্ধ নয়",
+    "invoiceBlockedTitle": "চালান এখনও উপলব্ধ নয়",
+    "invoiceBlockedMessage": "আপনার COD চালান তৈরি হবে যখন আপনার পার্সেল আমাদের গুদাম থেকে পাঠানো হবে।",
     "cancelOrder": "অর্ডার বাতিল করুন",
     "cancelled": "অর্ডার বাতিল হয়েছে",
     "cancelFailed": "এই অর্ডারটি বাতিল করা যায়নি",

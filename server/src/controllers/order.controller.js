@@ -19,6 +19,7 @@ const {
   RETURN_OPEN,
   RETURN_STATUS_STEPS,
   returnEligibility,
+  invoiceAvailable,
 } = require('../models/Order');
 
 /**
@@ -420,19 +421,43 @@ exports.getOrder = asyncHandler(async (req, res) => {
     data: {
       order,
       returnPolicy: { windowDays: returnWindowDays, ...returnEligibility(order, returnWindowDays) },
+      // Sent rather than recomputed on the client, for the same reason as the
+      // return policy above: one rule, stated once, so the button and the
+      // endpoint cannot disagree about an order that ships while the tab is open.
+      invoiceAvailable: invoiceAvailable(order),
     },
   });
 });
 
 /** GET /orders/:id/invoice — streams a PDF. */
 exports.downloadInvoice = asyncHandler(async (req, res) => {
-  const order = await Order.findById(req.params.id);
+  // The payment document comes with it: an online invoice prints the gateway
+  // reference, which is the only number a shopper can quote back to their bank.
+  const order = await Order.findById(req.params.id).populate('payment', 'razorpayPaymentId');
   if (!order) throw ApiError.notFound('Order not found');
   if (req.user.role !== 'admin' && String(order.user) !== String(req.user._id)) {
     throw ApiError.forbidden('You cannot download this invoice');
   }
-  if (order.paymentStatus !== 'paid' && order.paymentMethod !== 'cod') {
-    throw ApiError.badRequest('Invoice is available once payment is complete');
+  // Two rules, one per payment method — see invoiceAvailable(). The refusal has
+  // to name the right one: telling a prepaid shopper to wait for dispatch, or a
+  // COD shopper to complete a payment they make at the door, is a dead end.
+  if (!invoiceAvailable(order)) {
+    throw ApiError.badRequest(
+      order.paymentMethod === 'cod'
+        ? 'Invoice is available once the order has been dispatched'
+        : 'Invoice is available once payment is complete'
+    );
+  }
+
+  // The issue date, stamped the first time the document is actually produced and
+  // never afterwards — a reprint a year from now has to carry the date the
+  // invoice was issued, not the date it was reprinted. The write is conditional
+  // on the field still being empty, so two clicks in the same second cannot give
+  // the second one a later date; the read back is what that loser then prints.
+  if (!order.invoicedAt) {
+    await Order.updateOne({ _id: order._id, invoicedAt: null }, { $set: { invoicedAt: new Date() } });
+    const issued = await Order.findById(order._id).select('invoicedAt').lean();
+    order.invoicedAt = issued?.invoicedAt;
   }
 
   // Awaited: the PDF resolves its branding, artwork and QR before it writes a

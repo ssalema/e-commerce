@@ -150,6 +150,21 @@ export const productApi = {
     api.get('/products/home-feed', {
       params: seenIds.length ? { seen: seenIds.slice(0, 20).join(',') } : undefined,
     }),
+  /**
+   * The rest of one homepage rail. Each band continues through this rather than
+   * through `list()`, because two of them — "For You" and "Top Selling" — are
+   * rankings the listing endpoint has no sort for, and paging them by an approximate
+   * sort repeated and skipped products. `seen` personalises the continuation of
+   * "For You" exactly as it personalises its first page.
+   */
+  rail: (key, { offset = 0, limit, seen = [] } = {}) =>
+    api.get(`/products/rail/${key}`, {
+      params: {
+        offset,
+        ...(limit ? { limit } : null),
+        ...(seen.length ? { seen: seen.slice(0, 20).join(',') } : null),
+      },
+    }),
   detail: (idOrSlug) => api.get(`/products/${idOrSlug}`),
   related: (id) => api.get(`/products/${id}/related`),
   // Every combination of a product, including the sold-out ones the selector shows disabled.

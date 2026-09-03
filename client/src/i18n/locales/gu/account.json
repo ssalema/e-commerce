@@ -73,6 +73,8 @@
     "placedOn": "{{date}} ના રોજ આપ્યો",
     "downloadInvoice": "ઇન્વોઇસ ડાઉનલોડ કરો",
     "invoiceUnavailable": "ઇન્વોઇસ હજી ઉપલબ્ધ નથી",
+    "invoiceBlockedTitle": "ઇન્વોઇસ હજી ઉપલબ્ધ નથી",
+    "invoiceBlockedMessage": "તમારું COD ઇન્વોઇસ ત્યારે તૈયાર થશે જ્યારે તમારું પાર્સલ અમારા ગોદામમાંથી મોકલવામાં આવશે.",
     "cancelOrder": "ઓર્ડર રદ કરો",
     "cancelled": "ઓર્ડર રદ થયો",
     "cancelFailed": "આ ઓર્ડર રદ થઈ શક્યો નહીં",

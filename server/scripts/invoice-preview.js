@@ -1,20 +1,24 @@
 /**
- * Renders the tax invoice in src/services/invoice.service.js to a browsable set
- * of PDFs, without touching an order and without an HTTP request.
+ * Renders the order invoice in src/services/invoice.service.js to a PDF you can
+ * open, without touching an order and without an HTTP request.
  *
- *   node scripts/invoice-preview.js          # render, then print the index path
- *   node scripts/invoice-preview.js --open   # ...and open it in the browser
+ *   node scripts/invoice-preview.js          # render, then print the file path
+ *   node scripts/invoice-preview.js --open   # ...and open it in the viewer
  *   node scripts/invoice-preview.js --no-db  # skip Mongo; use env fallback branding
  *
  * Nothing about the document is duplicated here. The script hands the real
  * `streamInvoice` a response object that writes to a file instead of a socket,
- * and calls it with fixtures — so a preview can never drift from the PDF a
+ * and calls it with one fixture — so a preview can never drift from the PDF a
  * shopper downloads.
  *
- * The fixtures cover what the layout actually has to decide between: a paid card
- * order with a coupon, a COD order still awaiting payment, a single line with no
- * saving at all, a refunded one, and an order long enough to break the table and
- * push the summary and closing blocks onto a second page.
+ * One fixture, deliberately. Everything the layout can put on the page is on it:
+ * the three-row payment panel with a gateway reference, a coupon deduction, a
+ * delivery charge, the savings line under the summary, item rows with and
+ * without a variant and with and without a thumbnail — and enough lines that the table
+ * breaks, so the continuation masthead on page two and the footer pinned to the
+ * foot of both pages are on show as well. The states this order cannot also be —
+ * cash on delivery, refunded, an online order whose gateway reference was never
+ * recorded — only ever take a row away from what you see here.
  */
 
 const fs = require('fs');
@@ -24,6 +28,7 @@ const { execFile } = require('child_process');
 const env = require('../src/config/env');
 
 const OUT_DIR = path.join(__dirname, '../.invoice-preview');
+const OUT_FILE = path.join(OUT_DIR, 'invoice.pdf');
 
 const args = process.argv.slice(2);
 const useDb = !args.includes('--no-db');
@@ -76,13 +81,12 @@ function fileResponse(filePath) {
 }
 
 /* ------------------------------------------------------------------ *
- * Fixtures
+ * The fixture
  * ------------------------------------------------------------------ */
 
 const day = 24 * 60 * 60 * 1000;
-/** A fixed offset from a fixed instant, so re-running produces the same files. */
+/** A fixed offset from a fixed instant, so re-running produces the same file. */
 const NOW = new Date('2026-05-12T14:32:00+05:30').getTime();
-const ago = (days) => new Date(NOW - days * day);
 
 const address = {
   fullName: 'Ananya Sharma',
@@ -101,6 +105,12 @@ const address = {
  * that times the quantity. The invoice prints both and derives neither from the
  * other, so a fixture that disagreed with itself would look right here and be
  * wrong in production.
+ *
+ * The list runs long on purpose — it is what breaks the table onto a second
+ * page — and mixes every shape a row comes in: with a variant and without, with
+ * a thumbnail and without, and a name long enough to have to wrap inside its
+ * column. `variantSku` is still set on the fixtures because an order carries it;
+ * the invoice simply no longer prints it.
  */
 const items = [
   {
@@ -130,7 +140,81 @@ const items = [
     lineTotal: 1299,
     image: 'https://res.cloudinary.com/demo/image/upload/shoes.jpg',
   },
+  {
+    name: 'Studio Reference Monitor Headphones with Detachable Cable and Carry Pouch',
+    variantLabel: 'Graphite',
+    variantSku: 'STU-RM-GRP',
+    quantity: 1,
+    finalPrice: 12499,
+    lineTotal: 12499,
+    image: '',
+  },
+  {
+    name: 'Replacement Memory Foam Ear Cushions',
+    variantLabel: 'Protein Leather',
+    variantSku: 'CSH-MF-PL',
+    quantity: 2,
+    finalPrice: 899,
+    lineTotal: 1798,
+    image: '',
+  },
+  {
+    name: 'Desktop Headphone Stand, Solid Walnut',
+    variantLabel: '',
+    variantSku: 'STD-WAL-01',
+    quantity: 1,
+    finalPrice: 1999,
+    lineTotal: 1999,
+    image: 'https://res.cloudinary.com/demo/image/upload/sample.jpg',
+  },
+  {
+    name: '3.5 mm Audio Cable with Inline Microphone',
+    variantLabel: '1.2 m',
+    variantSku: '',
+    quantity: 3,
+    finalPrice: 549,
+    lineTotal: 1647,
+    image: '',
+  },
+  {
+    name: 'Bluetooth Audio Transmitter for In-Flight Entertainment',
+    variantLabel: '',
+    variantSku: 'BTX-AIR-02',
+    quantity: 1,
+    finalPrice: 2299,
+    lineTotal: 2299,
+    image: '',
+  },
+  {
+    name: 'Microfibre Cleaning Kit',
+    variantLabel: '',
+    variantSku: '',
+    quantity: 1,
+    finalPrice: 349,
+    lineTotal: 349,
+    image: '',
+  },
+  {
+    name: 'Extended Warranty — 2 Years, Accidental Damage',
+    variantLabel: 'Plan B',
+    variantSku: 'WTY-2Y-ADP',
+    quantity: 1,
+    finalPrice: 1499,
+    lineTotal: 1499,
+    image: '',
+  },
+  {
+    name: 'Gift Wrap and Handwritten Note',
+    variantLabel: 'Kraft',
+    variantSku: 'GFT-KRF',
+    quantity: 1,
+    finalPrice: 149,
+    lineTotal: 149,
+    image: '',
+  },
 ];
+
+const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
 
 /**
  * The item table sums to `subtotal` — every line billed at its discounted
@@ -140,157 +224,32 @@ const items = [
  * `subtotal`, so they sit outside that sum.
  */
 const pricing = {
-  mrpTotal: 11396,
-  subtotal: 10596,
-  discount: 800,
+  mrpTotal: subtotal + 3200,
+  subtotal,
+  discount: 3200,
   couponDiscount: 500,
   couponCode: 'WELCOME500',
-  shipping: 0,
-  total: 10096,
+  shipping: 79,
+  total: subtotal - 500 + 79,
 };
 
-const order = (overrides = {}) => ({
+const order = {
   _id: '6631f0a2c4d5e6f70123abcd',
   orderNumber: 'ORD2627000418',
   invoiceNumber: 'INV2627000418',
-  createdAt: ago(6),
+  createdAt: new Date(NOW - 6 * day),
+  // Issued two days after the order was placed, so the preview shows the two
+  // dates doing what they are there to do: differing.
+  invoicedAt: new Date(NOW - 4 * day),
   paymentMethod: 'razorpay',
   paymentStatus: 'paid',
+  // The Payment document the controller populates onto the order. Only its
+  // `razorpayPaymentId` is read — it is the transaction id on the payment panel.
+  payment: { razorpayPaymentId: 'pay_QeR8kZ2mTv91Lx' },
   items,
   pricing,
   shippingAddress: address,
-  ...overrides,
-});
-
-/** Long enough that the table has to break and carry its head onto page two. */
-const manyItems = Array.from({ length: 11 }, (_, i) => ({
-  name:
-    i % 3 === 0
-      ? 'Studio Reference Monitor Headphones with Detachable Cable and Carry Pouch'
-      : `Accessory Bundle ${i + 1}`,
-  variantLabel: i % 2 ? 'Charcoal' : '',
-  variantSku: `SKU-${1000 + i}`,
-  quantity: (i % 3) + 1,
-  finalPrice: 749 + i * 110,
-  lineTotal: (749 + i * 110) * ((i % 3) + 1),
-  image: i % 4 === 0 ? 'https://res.cloudinary.com/demo/image/upload/sample.jpg' : '',
-}));
-const manySubtotal = manyItems.reduce((sum, item) => sum + item.lineTotal, 0);
-
-const CASES = [
-  {
-    file: 'paid-card',
-    label: 'Paid — card, coupon applied',
-    note: 'Three lines, a coupon deduction and free delivery. The everyday invoice.',
-    order: order(),
-  },
-  {
-    file: 'cod-pending',
-    label: 'Cash on delivery — payment pending',
-    note: 'The amber payment chip, and a delivery charge that is actually charged.',
-    order: order({
-      paymentMethod: 'cod',
-      paymentStatus: 'pending',
-      pricing: { ...pricing, shipping: 79, total: 10175 },
-    }),
-  },
-  {
-    file: 'single-item',
-    label: 'Single item — no saving',
-    note: 'No coupon row and no savings line: the shortest the summary gets.',
-    order: order({
-      items: [items[0]],
-      pricing: { mrpTotal: 8499, subtotal: 8499, discount: 0, shipping: 0, total: 8499 },
-    }),
-  },
-  {
-    file: 'refunded',
-    label: 'Refunded',
-    note: 'A returned order still prints its invoice — the payment chip goes quiet.',
-    order: order({ paymentStatus: 'refunded' }),
-  },
-  {
-    file: 'multi-page',
-    label: 'Eleven lines — page break',
-    note: 'The table breaks, the head repeats, and the closing blocks find a page.',
-    order: order({
-      items: manyItems,
-      pricing: {
-        mrpTotal: manySubtotal + 1200,
-        subtotal: manySubtotal,
-        discount: 1200,
-        couponDiscount: 0,
-        shipping: 0,
-        total: manySubtotal,
-      },
-    }),
-  },
-];
-
-/* ------------------------------------------------------------------ *
- * Index
- * ------------------------------------------------------------------ */
-
-const escapeHtml = (value = '') =>
-  String(value).replace(
-    /[&<>"']/g,
-    (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]
-  );
-
-const INDEX_STYLE = `
-  :root{color-scheme:light dark}
-  *{box-sizing:border-box}
-  body{margin:0;padding:40px 20px;background:#f1f5f9;color:#0f172a;
-       font:400 15px/1.6 Inter,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}
-  .wrap{max-width:820px;margin:0 auto}
-  h1{margin:0 0 6px;font-size:28px;letter-spacing:-.5px}
-  .sub{margin:0 0 32px;color:#64748b;font-size:14px}
-  ul{list-style:none;margin:0;padding:0;display:grid;gap:10px}
-  li{background:#fff;border:1px solid #e2e8f0;border-radius:12px}
-  a.card{display:flex;gap:14px;align-items:baseline;flex-wrap:wrap;
-         padding:14px 18px;text-decoration:none;color:inherit}
-  a.card:hover{background:#f8fafc}
-  .name{font-weight:700}
-  .note{color:#64748b;font-size:13px}
-  .meta{width:100%;color:#475569;font-size:13px}
-  .meta b{color:#0f172a;font-weight:600}
-  footer{margin:36px 0 0;color:#94a3b8;font-size:12px;text-align:center}
-  @media (prefers-color-scheme:dark){
-    body{background:#0b1120;color:#e2e8f0}
-    li{background:#111c33;border-color:#1e293b}
-    a.card:hover{background:#16233d}
-    .meta b{color:#f8fafc}
-  }`;
-
-const indexPage = (rendered, branding) => `<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Invoice previews</title><style>${INDEX_STYLE}</style></head>
-<body>
-  <div class="wrap">
-    <h1>Invoice previews</h1>
-    <p class="sub">
-      ${rendered.length} rendering${rendered.length === 1 ? '' : 's'} of the document in
-      <code>src/services/invoice.service.js</code>. Branding: <b>${escapeHtml(branding)}</b>.
-      Each link opens the PDF exactly as <code>GET /orders/:id/invoice</code> streams it.
-    </p>
-    <ul>
-      ${rendered
-        .map(
-          (entry) => `
-        <li>
-          <a class="card" href="${entry.file}.pdf" target="_blank" rel="noopener">
-            <span class="name">${escapeHtml(entry.label)}</span>
-            <span class="note">${escapeHtml(entry.note)}</span>
-            <span class="meta">File: <b>${escapeHtml(entry.filename)}</b> &middot; ${entry.kb} KB</span>
-          </a>
-        </li>`
-        )
-        .join('')}
-    </ul>
-    <footer>Regenerate with <code>npm run invoice:preview</code>. No order was touched.</footer>
-  </div>
-</body></html>`;
+};
 
 /* ------------------------------------------------------------------ *
  * Main
@@ -304,43 +263,33 @@ async function main() {
 
   fs.mkdirSync(OUT_DIR, { recursive: true });
 
-  const rendered = [];
-  for (const preview of CASES) {
-    const filePath = path.join(OUT_DIR, `${preview.file}.pdf`);
-    const res = fileResponse(filePath);
-    // streamInvoice returns as soon as it has called doc.end(); the bytes are
-    // still draining into the file, so the size below has to wait for `finish`.
-    const written = new Promise((resolve, reject) => {
-      res.on('finish', resolve);
-      res.on('error', reject);
-    });
+  const res = fileResponse(OUT_FILE);
+  // streamInvoice returns as soon as it has called doc.end(); the bytes are
+  // still draining into the file, so the size below has to wait for `finish`.
+  const written = new Promise((resolve, reject) => {
+    res.on('finish', resolve);
+    res.on('error', reject);
+  });
 
-    await streamInvoice(preview.order, res);
-    await written;
+  await streamInvoice(order, res);
+  await written;
 
-    const kb = Math.round(fs.statSync(filePath).size / 1024);
-    const disposition = /filename="([^"]+)"/.exec(res.getHeader('content-disposition') || '');
-    rendered.push({ ...preview, kb, filename: disposition ? disposition[1] : `${preview.file}.pdf` });
-    console.log(`  ✓ ${preview.file}.pdf — ${preview.label} (${kb} KB)`);
-  }
+  const kb = Math.round(fs.statSync(OUT_FILE).size / 1024);
+  const disposition = /filename="([^"]+)"/.exec(res.getHeader('content-disposition') || '');
+  const filename = disposition ? disposition[1] : path.basename(OUT_FILE);
+  const branding = connected ? 'live Organization settings' : 'env fallback';
 
-  const indexPath = path.join(OUT_DIR, 'index.html');
-  fs.writeFileSync(
-    indexPath,
-    indexPage(rendered, connected ? 'live Organization settings' : 'env fallback')
-  );
-
-  console.log(`\n${rendered.length} previews → ${indexPath}`);
+  console.log(`\n  ✓ ${filename} — ${kb} KB, branding: ${branding}\n  → ${OUT_FILE}\n`);
 
   if (connected) await require('mongoose').disconnect();
   if (shouldOpen) {
     // `start` is a cmd builtin, hence the shell; `open`/`xdg-open` are binaries.
     const opener =
       process.platform === 'win32'
-        ? ['cmd', ['/c', 'start', '', indexPath]]
+        ? ['cmd', ['/c', 'start', '', OUT_FILE]]
         : process.platform === 'darwin'
-          ? ['open', [indexPath]]
-          : ['xdg-open', [indexPath]];
+          ? ['open', [OUT_FILE]]
+          : ['xdg-open', [OUT_FILE]];
     execFile(opener[0], opener[1]);
   }
 }

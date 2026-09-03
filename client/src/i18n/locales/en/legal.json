@@ -726,7 +726,7 @@
           },
           {
             "q": "Where do I find my invoice?",
-            "a": "Open the order under Account → My Orders and use Download invoice. It is available once payment is complete, and immediately for cash-on-delivery orders."
+            "a": "Open the order under Account → My Orders and use Download invoice. For prepaid orders it is ready as soon as the payment completes. For cash-on-delivery orders it is generated when your parcel is shipped from our warehouse, because that is when the goods are actually supplied."
           },
           {
             "q": "An item went out of stock while I was checking out. What happens?",

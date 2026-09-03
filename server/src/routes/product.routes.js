@@ -24,6 +24,10 @@ router.get('/search', cache.search, ctrl.searchSuggestions);
 // wishlist and orders. cache.catalogue follows it, and drops an authenticated response
 // to `private, no-cache` so one shopper's rail is never served to another.
 router.get('/home-feed', optionalAuth, cache.catalogue, ctrl.getHomeFeed);
+// The rest of one homepage rail. Same builder as the feed, same personalisation, so
+// "load more" continues the rail the shopper is looking at rather than an approximation
+// of it assembled from /products filters.
+router.get('/rail/:key', optionalAuth, pagination, validate, cache.catalogue, ctrl.getRail);
 router.post('/by-ids', ctrl.getProductsByIds);
 
 /* ---- Admin writes (declared before /:idOrSlug so they aren't shadowed) ---- */

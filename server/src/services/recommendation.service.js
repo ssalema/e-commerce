@@ -25,6 +25,13 @@ const { createTtlCache } = require('../utils/ttlCache');
  * of weaker sources — window sales → lifetime sales → popularity — so a shop on
  * its first day, with no orders and no signed-in shopper, still renders a full
  * homepage.
+ *
+ * Both are *ranked lists*, not queries, which is what makes "load more" work on
+ * them: the ranking is computed once, cached, and every page of the rail is a slice
+ * of that one list. Paging a personalised or sales-ranked rail through the ordinary
+ * `/products` sort was the bug this replaced — the continuation was ordered by
+ * something else entirely, so it repeated products the shopper had already seen and
+ * silently skipped others.
  */
 
 /** How far back a sale still counts as "currently selling". */
@@ -49,6 +56,16 @@ const FACET_WEIGHT = { subCategory: 3, category: 2, brand: 2, tag: 1 };
 
 /** How many rows to pull before scoring. Wide enough to re-rank, small enough to stay cheap. */
 const POOL_SIZE = 60;
+
+/**
+ * How deep either computed rail can be paged. It is a ceiling on the ranked list,
+ * so it is also the honest answer to "how many products could this rail ever show" —
+ * the storefront stops offering "load more" once the shopper reaches it.
+ *
+ * Ranking is cheap per row (ids only) but not free, and nobody pages a homepage rail
+ * a hundred products deep; the other three rails page the catalogue without a limit.
+ */
+const RAIL_DEPTH = 100;
 
 /** Signals older than this stop describing what the shopper wants today. */
 const SIGNAL_ORDER_LIMIT = 5; // most recent orders read for taste
@@ -89,25 +106,19 @@ function scorePool(pool) {
   });
 }
 
-/** viewCount rode along only to be scored on; it never reaches the client. */
-function strip(products) {
-  return products.map((product) => {
-    const copy = { ...product };
-    delete copy.viewCount;
-    return copy;
-  });
-}
-
 /**
  * The generic "what is doing well right now" list, used wherever a personalised or
  * sales-ranked answer runs short. Drawn from the most-viewed and best-selling rows,
  * then re-ranked on the blend above so it is not a duplicate of any single sort.
+ *
+ * The pool has to be at least as wide as the answer being asked for, or a deep rail
+ * would be re-ranking fewer rows than it needs to return.
  */
 async function getTrending({ select, limit, exclude = [] }) {
   const pool = await Product.find({ status: 'published', _id: { $nin: asObjectIds(exclude) } })
     .select(select + SCORE_FIELDS)
     .sort({ viewCount: -1, soldCount: -1, createdAt: -1 })
-    .limit(POOL_SIZE)
+    .limit(Math.max(POOL_SIZE, limit * 2))
     .lean({ virtuals: true });
 
   if (!pool.length) return [];
@@ -160,46 +171,89 @@ function orderByIds(products, ids) {
 }
 
 /**
- * "Top Selling Products" — real sales, most recent 90 days first.
+ * Turns one page of a ranked id list into card payloads, in rank order.
+ *
+ * Ranking is done on ids alone; the documents are only fetched for the slice the
+ * shopper is actually about to see, so paging a rail costs one small `$in` read
+ * rather than re-reading everything above it.
+ */
+async function fetchRanked(ids, select) {
+  if (!ids.length) return [];
+  const docs = await Product.find({ _id: { $in: asObjectIds(ids) }, status: 'published' })
+    .select(select)
+    .lean({ virtuals: true });
+  return orderByIds(docs, ids);
+}
+
+/**
+ * The ranked list behind "Top Selling Products" — real sales, most recent 90 days
+ * first — as ids.
  *
  * The fallback chain matters on a young shop: no orders in the window falls back to
  * lifetime `soldCount`, and no sales at all falls back to trending, so the rail is
  * populated from the first day rather than waiting for the first delivery.
+ *
+ * Cached for the same reason the sales aggregate is: it is the same list for every
+ * visitor, and every page of the rail — the first one and each "load more" after it —
+ * must be a slice of the *same* ranking or the shopper sees products twice.
  */
-async function getTopSelling({ select, limit = 10 }) {
-  const rankedIds = await recentSalesRanking(limit);
+const topSellingCache = createTtlCache({ ttlMs: 60 * 1000, max: 4 });
 
-  let products = [];
-  if (rankedIds.length) {
-    const found = await Product.find({ _id: { $in: rankedIds }, status: 'published' })
-      .select(select + SCORE_FIELDS)
-      .lean({ virtuals: true });
-    products = orderByIds(found, rankedIds).slice(0, limit);
-  }
+function rankTopSelling({ depth = RAIL_DEPTH } = {}) {
+  return topSellingCache.resolve(String(depth), async () => {
+    const rankedIds = await recentSalesRanking(depth);
 
-  if (products.length < limit) {
-    const topUp = await Product.find({
-      status: 'published',
-      soldCount: { $gt: 0 },
-      _id: { $nin: asObjectIds(products) },
-    })
-      .select(select + SCORE_FIELDS)
-      .sort({ soldCount: -1, 'ratings.average': -1 })
-      .limit(limit - products.length)
-      .lean({ virtuals: true });
-    products = products.concat(topUp);
-  }
+    let products = [];
+    if (rankedIds.length) {
+      // An order item is a frozen snapshot: some of the ids it names are unpublished
+      // or deleted by now, so the ranking is intersected with the live catalogue.
+      const found = await Product.find({ _id: { $in: rankedIds }, status: 'published' })
+        .select('_id')
+        .lean();
+      products = orderByIds(found, rankedIds).slice(0, depth);
+    }
 
-  if (products.length < limit) {
-    const topUp = await getTrending({
-      select,
-      limit: limit - products.length,
-      exclude: products,
-    });
-    products = products.concat(topUp);
-  }
+    if (products.length < depth) {
+      const topUp = await Product.find({
+        status: 'published',
+        soldCount: { $gt: 0 },
+        _id: { $nin: asObjectIds(products) },
+      })
+        .select('_id')
+        // `_id` breaks ties: without it two products on the same sold count have no
+        // defined order, and a ranking that reshuffles between pages is the same bug
+        // in a smaller costume.
+        .sort({ soldCount: -1, 'ratings.average': -1, _id: -1 })
+        .limit(depth - products.length)
+        .lean();
+      products = products.concat(topUp);
+    }
 
-  return strip(products);
+    if (products.length < depth) {
+      const topUp = await getTrending({
+        select: '_id',
+        limit: depth - products.length,
+        exclude: products,
+      });
+      products = products.concat(topUp);
+    }
+
+    return products.map(toId);
+  });
+}
+
+/**
+ * One page of "Top Selling Products".
+ *
+ * `total` is the depth of the ranking, not the size of the catalogue — it is what the
+ * storefront needs to decide whether "load more" has anything behind it.
+ */
+async function getTopSelling({ select, limit = 10, offset = 0 }) {
+  const ids = await rankTopSelling();
+  return {
+    products: await fetchRanked(ids.slice(offset, offset + limit), select),
+    total: ids.length,
+  };
 }
 
 /**
@@ -264,19 +318,41 @@ function buildAffinity(sources, weightById) {
 }
 
 /**
- * "Products For You" — the catalogue filtered to what this shopper keeps coming back
- * to, ranked by how strongly it matches plus how well it is doing generally.
+ * The ranked list behind "Products For You" — the catalogue filtered to what this
+ * shopper keeps coming back to, ranked by how strongly it matches plus how well it is
+ * doing generally — as ids.
  *
  * Source products are excluded from the result: recommending the item already sitting
  * in their cart, or the one they are looking at, is the failure mode this rail exists
  * to avoid. `excludeIds` lets the caller keep the rail distinct from Top Selling above it.
+ *
+ * Cached per shopper for a minute, keyed on everything that shapes the answer. That is
+ * partly cost — this is the most expensive read on the homepage — but mainly
+ * correctness: "load more" is a slice of this list, and a ranking recomputed between
+ * pages (a wishlist add, a cart change) would drop products out from under the shopper
+ * or repeat them.
  */
-async function getForYou({ userId, seenIds = [], excludeIds = [], select, limit = 10 }) {
+const forYouCache = createTtlCache({ ttlMs: 60 * 1000, max: 200 });
+
+function rankForYou({ userId, seenIds = [], excludeIds = [], depth = RAIL_DEPTH }) {
+  const key = [
+    userId ? toId(userId) : 'anon',
+    [...seenIds].map(toId).sort().join(','),
+    [...excludeIds].map(toId).sort().join(','),
+    depth,
+  ].join('|');
+
+  return forYouCache.resolve(key, () => buildForYou({ userId, seenIds, excludeIds, depth }));
+}
+
+async function buildForYou({ userId, seenIds, excludeIds, depth }) {
+  const limit = depth;
+  const select = '_id';
   const signals = await collectSignals(userId, seenIds);
 
   // Nothing known about this visitor — trending is the honest answer.
   if (!signals.length) {
-    return strip(await getTrending({ select, limit, exclude: excludeIds }));
+    return (await getTrending({ select, limit, exclude: excludeIds })).map(toId);
   }
 
   const weightById = new Map(signals.map((s) => [s.id, s.weight]));
@@ -303,8 +379,9 @@ async function getForYou({ userId, seenIds = [], excludeIds = [], select, limit 
   if (or.length) {
     const pool = await Product.find({ status: 'published', _id: { $nin: excluded }, $or: or })
       .select(select + SCORE_FIELDS)
-      .sort({ soldCount: -1, viewCount: -1 })
-      .limit(POOL_SIZE)
+      .sort({ soldCount: -1, viewCount: -1, _id: -1 })
+      // Wide enough to still be re-ranking rather than just returning, at any depth.
+      .limit(Math.max(POOL_SIZE, limit * 2))
       .lean({ virtuals: true });
 
     /*
@@ -342,7 +419,20 @@ async function getForYou({ userId, seenIds = [], excludeIds = [], select, limit 
     products = products.concat(topUp);
   }
 
-  return strip(products);
+  return products.map(toId);
 }
 
-module.exports = { getTopSelling, getForYou, getTrending };
+/**
+ * One page of "Products For You". `total` is the depth of the ranking — see
+ * `getTopSelling` — so the storefront only offers "load more" while there is more of
+ * *this shopper's* list to show.
+ */
+async function getForYou({ userId, seenIds = [], excludeIds = [], select, limit = 10, offset = 0 }) {
+  const ids = await rankForYou({ userId, seenIds, excludeIds });
+  return {
+    products: await fetchRanked(ids.slice(offset, offset + limit), select),
+    total: ids.length,
+  };
+}
+
+module.exports = { getTopSelling, getForYou, getTrending, rankTopSelling, RAIL_DEPTH };

@@ -73,6 +73,8 @@
     "placedOn": "Placed on {{date}}",
     "downloadInvoice": "Download invoice",
     "invoiceUnavailable": "Invoice is not available yet",
+    "invoiceBlockedTitle": "Invoice not available yet",
+    "invoiceBlockedMessage": "Your COD invoice will be generated when your parcel is shipped from our warehouse.",
     "cancelOrder": "Cancel order",
     "cancelled": "Order cancelled",
     "cancelFailed": "Could not cancel this order",

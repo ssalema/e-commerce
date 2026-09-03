@@ -8,7 +8,7 @@ const logger = require('../utils/logger');
 const { getBranding } = require('./mail.service');
 
 /**
- * The tax invoice, drawn straight into the HTTP response — nothing is written to
+ * The order invoice, drawn straight into the HTTP response — nothing is written to
  * disk and nothing is cached, so an invoice reprinted a year later is rebuilt
  * from the order document that has always been its only source of truth.
  *
@@ -18,6 +18,12 @@ const { getBranding } = require('./mail.service');
  * apart. Type is the four PDF base fonts — Helvetica for the document, Times for
  * the one line of display serif in the footer — because a bundled webfont would
  * be a megabyte on every download for a page that reads as well without it.
+ *
+ * The page is laid out before a mark is made on it. `paginate()` measures every
+ * row and the summary block, decides what goes on which sheet, and only then
+ * does the drawing begin — which is what lets a continuation page use the full
+ * height of the paper, and lets the summary pull the last line item down with it
+ * rather than opening a sheet that carries nothing but a total.
  */
 
 const ASSET_DIR = path.join(__dirname, '../assets/email');
@@ -53,32 +59,53 @@ const P = {
 
 /* ------------------------------------------------------------------ *
  * Geometry — A4 at 72dpi is 595.28 x 841.89pt.
+ *
+ * The margins are 34pt — a shade under 12mm, and inside every desktop printer's
+ * unprintable edge. They were 48, which cost 28pt of column width and read as a
+ * document floating in the middle of the sheet rather than set on it.
+ *
+ * Vertically the page is a fixed frame: the letterhead opens the first sheet and
+ * the closing blocks end the last. What changes per page is how far the content
+ * may run — a sheet that ends in a page number can use the paper the masthead
+ * and the closing blocks would otherwise be holding, and does.
  * ------------------------------------------------------------------ */
-const FRAME = { x: 24, y: 24, w: 547.28, h: 793.89 };
-const LEFT = 48;
-const RIGHT = 547;
+const LEFT = 34;
+const RIGHT = 561;
 const WIDTH = RIGHT - LEFT;
 
-/** The last line of ink the page allows — 12pt inside the frame's bottom edge. */
-const BOTTOM = 810;
-/** Continuation pages resume below the frame's top edge. */
-const PAGE_TOP = 60;
-/** Heights of the two closing blocks, which are laid out as units. */
-const TRUST_H = 48;
-const FOOTER_H = 74;
+/** The last line of ink the page allows. */
+const BOTTOM = 812;
 /**
- * Where a flowing block — a row, or the whole summary — has to stop and take a
- * new page. It is the foot of the page, not the point where the closing blocks
- * would like to begin: content earns the page first, and the trust row and
- * footer fit themselves in underneath or move on. Reserving their space up here
- * instead is what pushed a summary that had 90pt of paper under it onto a sheet
- * of its own, and left the first page half empty to pay for it.
+ * Where a continuation page starts. It carries no masthead — a letterhead is
+ * something a document has once, and repeating it turned every sheet after the
+ * first into a second cover page — so the table begins at the top margin.
  */
-const CONTENT_BOTTOM = BOTTOM - 40;
-/** Breathing room between the last of the content and the closing blocks. */
-const CLOSING_GAP = 22;
-/** …squeezed to this when it is the difference between one page and two. */
-const CLOSING_GAP_MIN = 12;
+const PAGE_TOP = 40;
+
+/** Heights of the two closing blocks, which are laid out as units. */
+const TRUST_H = 40;
+const FOOTER_H = 74;
+/** Gap between the trust row and the footer beneath it. */
+const CLOSING_GAP = 12;
+
+/** The foot of the last page, fixed: the closing blocks never move off these lines. */
+const FOOTER_Y = BOTTOM - FOOTER_H;
+const TRUST_Y = FOOTER_Y - CLOSING_GAP - TRUST_H;
+
+/** The baseline the foot line sits on, the same on every sheet. */
+const PAGE_FOOT_TEXT = 801;
+
+/**
+ * Where content has to stop. Two lines, not one — this is the whole reason a
+ * continuation page used to hold 126pt of paper for closing blocks it never
+ * carried. A sheet that ends in the page counter may run to `FLOW_BOTTOM`; only
+ * the sheet that actually closes the document stops at `LAST_BOTTOM`.
+ */
+const FLOW_BOTTOM = PAGE_FOOT_TEXT - 16;
+const LAST_BOTTOM = TRUST_Y - 16;
+
+/** Breathing room between the item table and the summary under it. */
+const SUMMARY_GAP = 10;
 
 const TAGLINE = 'Quality Products, Premium Experience';
 
@@ -175,7 +202,7 @@ function inWords(n) {
 
 /**
  * The amount spelled out, which is what makes the figure above it hard to alter
- * after the fact — the reason every tax invoice carries the line.
+ * after the fact — the reason every invoice carries the line.
  */
 function amountInWords(amount) {
   const rupees = Math.floor(amount);
@@ -249,17 +276,6 @@ function cover(doc, buffer, x, y, size, radius) {
  * Drawing primitives
  * ------------------------------------------------------------------ */
 
-/** The card every page is printed inside. Redrawn per page by `pageAdded`. */
-function drawFrame(doc) {
-  doc
-    .save()
-    .lineWidth(0.8)
-    .roundedRect(FRAME.x, FRAME.y, FRAME.w, FRAME.h, 10)
-    .strokeColor(P.ink200)
-    .stroke()
-    .restore();
-}
-
 const rule = (doc, y, color = P.ink200, width = 0.8, x0 = LEFT, x1 = RIGHT) =>
   doc.save().lineWidth(width).moveTo(x0, y).lineTo(x1, y).strokeColor(color).stroke().restore();
 
@@ -279,6 +295,23 @@ const dashedRule = (doc, x0, y0, x1, y1) =>
 function disc(doc, file, cx, cy, radius, fill, glyphSize) {
   doc.save().circle(cx, cy, radius).fill(fill).restore();
   glyph(doc, file, cx - glyphSize / 2, cy - glyphSize / 2, glyphSize);
+}
+
+/**
+ * One line of text, clipped with an ellipsis if it will not fit its column.
+ *
+ * `lineBreak: false` reads like it should do this and does not — PDFKit wraps at
+ * the given width regardless, and the overflow lands on top of whatever was
+ * drawn beneath it. A long address line was printing its tail across the city
+ * and pincode under it for exactly this reason. Constraining the *height* to a
+ * single line is what actually holds the text to one.
+ *
+ * The font has to be set before the call: the line height is read from it — and
+ * read with the line gap included, because `currentLineHeight()` without the
+ * flag returns the type's own height and PDFKit advances by more than that.
+ */
+function oneLine(doc, text, x, y, width, options = {}) {
+  doc.text(text, x, y, { width, height: doc.currentLineHeight(true), ellipsis: true, ...options });
 }
 
 /** A status chip: text on a tinted pill, sized to the text it holds. */
@@ -301,39 +334,35 @@ function heart(doc, cx, cy, s) {
     .restore();
 }
 
-
 /* ------------------------------------------------------------------ *
  * Sections
- *
- * Every block is set tight enough that a three-line order still closes
- * on one page: a shopper who opens an invoice and finds the totals on a
- * second sheet reads it as an error, and half a page of white above the
- * footer as an unfinished document.
  * ------------------------------------------------------------------ */
 
 /**
  * Masthead: the mark, the name split across navy and gold, and the registered
  * address. The address stands where the site URL and the support inbox used to:
- * a tax invoice has to say where the seller is, and both of those are repeated
+ * an invoice has to say where the seller is, and both of those are repeated
  * in the footer anyway.
+ *
+ * First sheet only.
  */
 function header(doc, brand, logo) {
-  const y = 30;
+  const y = 26;
 
   if (logo) {
     // An uploaded logo carries its own colours, so it gets a white tile with a
     // hairline rather than the navy one the bundled stand-in is cut for.
-    doc.save().roundedRect(LEFT, y, 42, 42, 12).lineWidth(0.8).fillAndStroke(P.white, P.ink200).restore();
-    doc.save().roundedRect(LEFT, y, 42, 42, 12).clip();
+    doc.save().roundedRect(LEFT, y, 40, 40, 12).lineWidth(0.8).fillAndStroke(P.white, P.ink200).restore();
+    doc.save().roundedRect(LEFT, y, 40, 40, 12).clip();
     try {
-      doc.image(logo, LEFT + 5, y + 5, { fit: [32, 32], align: 'center', valign: 'center' });
+      doc.image(logo, LEFT + 5, y + 5, { fit: [30, 30], align: 'center', valign: 'center' });
     } catch (err) {
       logger.warn(`Invoice logo could not be drawn: ${err.message}`);
     }
     doc.restore();
   } else {
-    doc.save().roundedRect(LEFT, y, 42, 42, 12).fill(P.ink900).restore();
-    glyph(doc, 'brand-shield-lock.png', LEFT + 10, y + 10, 22);
+    doc.save().roundedRect(LEFT, y, 40, 40, 12).fill(P.ink900).restore();
+    glyph(doc, 'brand-shield-lock.png', LEFT + 9, y + 9, 22);
   }
 
   const [first, ...rest] = String(brand.siteName || env.appName).split(' ');
@@ -341,40 +370,46 @@ function header(doc, brand, logo) {
     .font('Helvetica-Bold')
     .fontSize(18)
     .fillColor(P.ink900)
-    .text(first, 100, y + 5, { continued: rest.length > 0, lineBreak: false });
+    .text(first, LEFT + 52, y + 4, { continued: rest.length > 0, lineBreak: false });
   if (rest.length) doc.fillColor(P.accentDark).text(` ${rest.join(' ')}`, { lineBreak: false });
 
-  doc.font('Helvetica').fontSize(8).fillColor(P.ink500).text(TAGLINE, 100, y + 27, { lineBreak: false });
+  doc
+    .font('Helvetica')
+    .fontSize(8)
+    .fillColor(P.ink500)
+    .text(TAGLINE, LEFT + 52, y + 26, { lineBreak: false });
 
   if (brand.address) {
-    glyph(doc, 'step-location.png', 335, y + 3, 11);
+    glyph(doc, 'step-location.png', RIGHT - 212, y + 2, 11);
     doc
       .font('Helvetica')
       .fontSize(8)
       .fillColor(P.ink500)
-      .text(brand.address, 351, y + 2, { width: RIGHT - 351, lineGap: 2 });
+      .text(brand.address, RIGHT - 196, y + 1, { width: 196, lineGap: 2 });
   }
 
   // The one gold rule on the page, and the widest — it is what separates the
   // letterhead from the document proper. It sits 12pt under the mark, close
   // enough to read as that block's own underline rather than as a band of empty
   // paper between two unrelated things.
-  rule(doc, 84, P.accentDark, 1.2);
+  rule(doc, 78, P.accentDark, 1.2);
 }
 
-/** "TAX INVOICE" against the card that carries the three numbers it is filed by. */
+/** "ORDER INVOICE" against the card that carries the three numbers it is filed by. */
 function titleBlock(doc, order) {
   doc
     .font('Helvetica-Bold')
-    .fontSize(25)
+    .fontSize(23)
     .fillColor(P.ink900)
-    .text('TAX INVOICE', LEFT, 96, { characterSpacing: 0.4, lineBreak: false });
+    .text('ORDER INVOICE', LEFT, 90, { characterSpacing: 0.4, lineBreak: false });
   // 8pt under the baseline, not under the line box: PDFKit's `y` is the top of
-  // the line, and at 25pt the descender space below the caps is most of a
+  // the line, and at 23pt the descender space below the caps is most of a
   // centimetre — measuring from it left the rule adrift from the word it marks.
-  doc.save().roundedRect(LEFT, 122, 42, 3, 1.5).fill(P.accentDark).restore();
+  doc.save().roundedRect(LEFT, 114, 42, 3, 1.5).fill(P.accentDark).restore();
 
-  const card = { x: 305, y: 92, w: 242, h: 84 };
+  // Four rows at a 22pt pitch. Each number sits directly above its own date, so
+  // the card reads as two pairs rather than a list of four unrelated facts.
+  const card = { x: RIGHT - 258, y: 84, w: 258, h: 100 };
   doc
     .save()
     .roundedRect(card.x, card.y, card.w, card.h, 10)
@@ -382,25 +417,29 @@ function titleBlock(doc, order) {
     .fillAndStroke(P.ink50, P.ink200)
     .restore();
 
+  // Two different moments, and the reason both are printed: the order date is
+  // when the shopper placed it, and the invoice date is when this document was
+  // first issued — which for a COD order can be days later. `invoicedAt` is
+  // stamped by the download endpoint on first generation; orders placed before
+  // the field existed have none, and fall back to the order date rather than
+  // printing a blank.
   const rows = [
     ['step-clipboard-white.png', 'Invoice No.', order.invoiceNumber || '—'],
+    ['inquiry-calendar-white.png', 'Invoice Date', longDate(order.invoicedAt || order.createdAt)],
     ['step-package-white.png', 'Order No.', order.orderNumber || '—'],
-    ['inquiry-calendar-white.png', 'Date', longDate(order.createdAt)],
+    ['inquiry-calendar-white.png', 'Order Date', longDate(order.createdAt)],
   ];
 
   rows.forEach(([icon, label, value], i) => {
-    const y = card.y + 11 + i * 26;
+    const y = card.y + 9 + i * 22;
     disc(doc, icon, card.x + 17, y + 8, 9, P.ink900, 10);
     doc.font('Helvetica-Bold').fontSize(8).fillColor(P.ink900).text(label, card.x + 35, y + 5, {
       width: 70,
       lineBreak: false,
     });
     doc.font('Helvetica').fillColor(P.ink400).text(':', card.x + 107, y + 5, { lineBreak: false });
-    doc.fontSize(8.5).fillColor(P.ink700).text(value, card.x + 118, y + 4.5, {
-      width: card.w - 128,
-      lineBreak: false,
-      ellipsis: true,
-    });
+    doc.fontSize(8.5).fillColor(P.ink700);
+    oneLine(doc, value, card.x + 118, y + 4.5, card.w - 130);
   });
 }
 
@@ -414,205 +453,192 @@ const PAYMENT_TINTS = {
   refunded: { bg: P.ink100, fg: P.ink600 },
 };
 
+/* ------------------------------------------------------------------ *
+ * The two panels under the title — who the order went to, and how it was paid
+ * for. They were one card split by a dashed rule, which asked the reader to
+ * take "billed & shipped to" as the heading for a payment status it plainly
+ * does not describe. They are two cards now, each under its own label.
+ * ------------------------------------------------------------------ */
 /**
- * Who it went to, on the left; how it was paid for, on the right.
- *
- * The right column carries the payment facts and nothing else. Where an order
- * has got to is live information — it is "confirmed" the day this is printed and
- * "delivered" a week later — and an invoice is a fixed record of a transaction,
- * so it would be stale on the copy in the shopper's downloads folder. The
- * storefront's order page tracks it, and tracks it correctly.
+ * `h` is measured, not chosen. The ribbon's underside is at `y + 10`; content
+ * starts 4pt clear of it at `PANEL_TOP`, runs to the longest thing either panel
+ * holds — a name, a 10pt gap, and four lines of address — and closes on a foot
+ * the weight of the head. The 14pt at the top used to be 28, which read as a
+ * missing field under the label.
  */
-function partiesCard(doc, order) {
-  const card = { x: LEFT, y: 194, w: WIDTH, h: 88 };
+const PANEL = { y: 204, h: 94 };
+/** The first line inside a panel — clear of the ribbon that overlaps its top. */
+const PANEL_TOP = PANEL.y + 14;
+/**
+ * The name sits on the panel's first line as a heading, and the address is its
+ * body: the gap between them is what tells them apart. Set flush they read as
+ * one ragged block with the name accidentally bolded.
+ */
+const NAME_H = 20;
+const NAME_GAP = 10;
+const CUSTOMER = { x: LEFT, w: 307 };
+const PAYMENT = { x: LEFT + 321, w: RIGHT - (LEFT + 321) };
+
+/** The panel body. */
+function panel(doc, x, w) {
   doc
     .save()
-    .roundedRect(card.x, card.y, card.w, card.h, 10)
+    .roundedRect(x, PANEL.y, w, PANEL.h, 10)
     .lineWidth(0.8)
     .fillAndStroke(P.white, P.ink200)
     .restore();
+}
 
-  // The ribbon overlaps the card's top edge, tip first, so the label reads as
-  // attached to the panel rather than floating above it.
+/**
+ * The label, cut as a ribbon that overlaps the panel's top edge tip first, so it
+ * reads as attached to the panel rather than floating above it. Sized to its own
+ * text: two ribbons of a fixed width would leave the shorter one padded out.
+ */
+function ribbon(doc, text, x) {
+  const top = PANEL.y - 12;
+  doc.font('Helvetica-Bold').fontSize(8);
+  const w = doc.widthOfString(text, { characterSpacing: 0.7 }) + 30;
   doc
     .save()
-    .moveTo(LEFT, 182)
-    .lineTo(LEFT + 166, 182)
-    .lineTo(LEFT + 179, 193)
-    .lineTo(LEFT + 166, 204)
-    .lineTo(LEFT, 204)
+    .moveTo(x, top)
+    .lineTo(x + w, top)
+    .lineTo(x + w + 13, top + 11)
+    .lineTo(x + w, top + 22)
+    .lineTo(x, top + 22)
     .fill(P.ink900)
     .restore();
-  doc
-    .font('Helvetica-Bold')
-    .fontSize(8)
-    .fillColor(P.white)
-    .text('BILLED & SHIPPED TO', LEFT + 15, 189, { characterSpacing: 0.7, lineBreak: false });
+  doc.fillColor(P.white).text(text, x + 15, top + 7, { characterSpacing: 0.7, lineBreak: false });
+}
 
-  /* Left — the address the parcel was shipped to, which is also the billing name. */
+/** Left — the address the parcel was shipped to, which is also the billing name. */
+function customerCard(doc, order) {
+  panel(doc, CUSTOMER.x, CUSTOMER.w);
+  ribbon(doc, 'CUSTOMER DETAILS', CUSTOMER.x);
+
   const a = order.shippingAddress;
-  disc(doc, 'inquiry-user-accent.png', 79, 228, 13, P.accent50, 13);
+  // A disc small enough to clear the ribbon: at r13 its top crossed the label.
+  disc(doc, 'inquiry-user-accent.png', CUSTOMER.x + 28, PANEL_TOP + 10, 10, P.accent50, 12);
 
-  doc
-    .font('Helvetica-Bold')
-    .fontSize(12)
-    .fillColor(P.ink900)
-    .text(a.fullName, 99, 222, { width: 180, lineBreak: false, ellipsis: true });
+  doc.font('Helvetica-Bold').fontSize(12).fillColor(P.ink900);
+  oneLine(doc, a.fullName, CUSTOMER.x + 44, PANEL_TOP + 3, CUSTOMER.w - 58);
 
-  const lines = [
-    [a.addressLine1, a.addressLine2, a.landmark].filter(Boolean).join(', '),
-    `${a.city}, ${a.state} - ${a.pincode}`,
-    `${a.country || 'India'} · ${a.phone}`,
-  ];
+  const x = CUSTOMER.x + 16;
+  const w = CUSTOMER.w - 32;
   doc.font('Helvetica').fontSize(8.5).fillColor(P.ink600);
-  lines.forEach((line, i) => {
-    doc.text(line, 64, 245 + i * 12.5, { width: 226, lineBreak: false, ellipsis: true });
-  });
+  const lh = doc.currentLineHeight(true);
 
-  dashedRule(doc, 300, 206, 300, 270);
+  // The street gets two lines if it needs them. Held to one it dropped the
+  // landmark off the end, and a landmark is the half of an Indian address a
+  // courier actually navigates by — the panel is sized for the wrap.
+  const street = [a.addressLine1, a.addressLine2, a.landmark].filter(Boolean).join(', ');
+  const streetH = Math.min(doc.heightOfString(street, { width: w }), lh * 2);
+  let y = PANEL_TOP + NAME_H + NAME_GAP;
+  // The +1 is slack, not decoration: at exactly two line heights PDFKit decides
+  // the second line does not fit and ellipsises the first.
+  doc.text(street, x, y, { width: w, height: lh * 2 + 1, ellipsis: true });
 
-  /* Right — the payment facts a shopper checks an invoice for. */
+  y += streetH + 2;
+  oneLine(doc, `${a.city}, ${a.state} - ${a.pincode}`, x, y, w);
+  oneLine(doc, `${a.country || 'India'} · ${a.phone}`, x, y + lh + 2, w);
+}
+
+/**
+ * Right — the payment facts a shopper checks an invoice for, label over value so
+ * a gateway reference has the full width of the panel to be legible in.
+ *
+ * Where an order has got to is deliberately not here. That is live information —
+ * it is "confirmed" the day this is printed and "delivered" a week later — and
+ * an invoice is a fixed record of a transaction, so it would be stale on the
+ * copy in the shopper's downloads folder. The storefront's order page tracks it.
+ */
+function paymentCard(doc, order) {
+  panel(doc, PAYMENT.x, PAYMENT.w);
+  ribbon(doc, 'PAYMENT DETAILS', PAYMENT.x);
+
+  const online = order.paymentMethod !== 'cod';
   const status = order.paymentStatus || 'pending';
+  // Populated when the controller has a Payment document to hand; an online
+  // order that was never captured simply has no reference to print.
+  const reference = online ? order.payment?.razorpayPaymentId : null;
+
   const rows = [
     {
       icon: 'inquiry-bag.png',
-      label: 'Payment Method',
-      value: order.paymentMethod === 'cod' ? 'Cash on Delivery' : 'Online (Razorpay)',
+      label: 'PAYMENT METHOD',
+      value: online ? 'Online (Razorpay)' : 'Cash on Delivery',
     },
     {
       icon: 'shield-check-brand.png',
-      label: 'Payment Status',
+      label: 'PAYMENT STATUS',
       value: titleCase(status),
       tint: PAYMENT_TINTS[status] || PAYMENT_TINTS.refunded,
     },
-  ];
+    reference ? { icon: 'step-clipboard.png', label: 'TRANSACTION ID', value: reference } : null,
+  ].filter(Boolean);
+
+  // Three rows fill the panel exactly; two are set on a looser pitch and centred
+  // in the same space, so the shorter card reads as deliberately spaced rather
+  // than top-heavy.
+  const pitch = rows.length > 2 ? 24 : 30;
+  const room = PANEL.h - 18;
+  const top = PANEL_TOP + Math.max(0, room - rows.length * pitch) / 2;
+  const textX = PAYMENT.x + 38;
+  const textW = RIGHT - 9 - textX;
 
   rows.forEach((row, i) => {
-    const y = 210 + i * 32;
-    doc.save().roundedRect(318, y, 24, 24, 7).fill(P.ink50).restore();
-    glyph(doc, row.icon, 323.5, y + 5.5, 13);
+    const y = top + i * pitch;
+    doc.save().roundedRect(PAYMENT.x + 12, y, 20, 20, 6).fill(P.ink50).restore();
+    glyph(doc, row.icon, PAYMENT.x + 16.5, y + 4.5, 11);
 
     doc
       .font('Helvetica-Bold')
-      .fontSize(8)
-      .fillColor(P.ink900)
-      .text(row.label, 352, y + 8, { width: 82, lineBreak: false });
-    doc.font('Helvetica').fillColor(P.ink400).text(':', 440, y + 8, { lineBreak: false });
+      .fontSize(6.5)
+      .fillColor(P.ink400)
+      .text(row.label, textX, y + 1, { characterSpacing: 0.6, lineBreak: false });
 
-    if (row.tint) pill(doc, row.value, 452, y + 8, row.tint);
-    else
-      doc
-        .font('Helvetica')
-        .fontSize(8)
-        .fillColor(P.ink700)
-        .text(row.value, 452, y + 8, { width: 79, lineBreak: false, ellipsis: true });
-
-    if (i < rows.length - 1) rule(doc, y + 28, P.ink100, 0.7, 318, 531);
+    // No rules between the rows: at this pitch the discs already read as a
+    // column of three, and a hairline every 24pt in a narrow panel is noise.
+    if (row.tint) pill(doc, row.value, textX, y + 11, row.tint);
+    else {
+      doc.font('Helvetica').fontSize(8.5).fillColor(P.ink700);
+      oneLine(doc, row.value, textX, y + 11, textW);
+    }
   });
 }
 
-/** Where the item table starts on the first page, under the parties card. */
-const TABLE_TOP = 296;
+/** Where the item table starts on the first page, under the two panels. */
+const TABLE_TOP = PANEL.y + PANEL.h + 14;
+
+/** The navy band above the line items, and its height. */
+const HEAD_H = 26;
 
 const COLS = {
-  thumb: 62,
-  text: 110,
-  textWidth: 214,
-  qty: 332,
-  qtyWidth: 44,
-  rate: 384,
-  rateWidth: 78,
-  amount: 462,
-  amountWidth: 69,
+  thumb: LEFT + 14,
+  text: LEFT + 62,
+  textWidth: 226,
+  qty: 336,
+  qtyWidth: 46,
+  rate: 390,
+  rateWidth: 82,
+  amount: 478,
+  amountWidth: 67,
 };
 
-/** The navy band above the line items — repeated on every page the table spills onto. */
+/** Repeated on every page the table spills onto. */
 function tableHead(doc, y) {
-  doc.save().roundedRect(LEFT, y, WIDTH, 26, 7).fill(P.ink900).restore();
+  doc.save().roundedRect(LEFT, y, WIDTH, HEAD_H, 7).fill(P.ink900).restore();
   doc.font('Helvetica-Bold').fontSize(8).fillColor(P.white);
   const opts = { characterSpacing: 0.6, lineBreak: false };
   doc.text('ITEM', COLS.thumb, y + 9, opts);
   doc.text('QTY', COLS.qty, y + 9, { ...opts, width: COLS.qtyWidth, align: 'center' });
   doc.text('RATE', COLS.rate, y + 9, { ...opts, width: COLS.rateWidth, align: 'right' });
   doc.text('AMOUNT', COLS.amount, y + 9, { ...opts, width: COLS.amountWidth, align: 'right' });
-  return y + 26;
-}
-
-/**
- * One row per shipped SKU. The line names the variant *and* its SKU: the invoice
- * is the document a return or a warranty claim is checked against, and "Black ·
- * M" is what tells that claim apart from the other size in the same order.
- *
- * Both sit on one line under the name rather than stacking, which is what keeps
- * a row to 46pt — the difference between three items fitting on this page and
- * the totals being pushed onto a second one.
- */
-function itemsTable(doc, order, shots) {
-  let sectionTop = TABLE_TOP;
-  let y = tableHead(doc, TABLE_TOP);
-
-  order.items.forEach((item, i) => {
-    const meta = [item.variantLabel && `(${item.variantLabel})`, item.variantSku && `SKU: ${item.variantSku}`]
-      .filter(Boolean)
-      .join('  ·  ');
-
-    doc.font('Helvetica-Bold').fontSize(8.5);
-    // Capped at two lines: a product name is denormalised onto the order and can
-    // be any length an admin typed, and one row is not allowed to grow taller
-    // than the page it has to break against.
-    const titleHeight = Math.min(doc.heightOfString(item.name, { width: COLS.textWidth }), 22);
-    const height = Math.max(45, titleHeight + (meta ? 11 : 0) + 17);
-
-    if (y + height > CONTENT_BOTTOM) {
-      // Close the table's border over what has been drawn, then carry the head
-      // onto the next page — a bare continuation of rows reads as a new table.
-      tableBorder(doc, sectionTop, y);
-      doc.addPage();
-      sectionTop = PAGE_TOP;
-      y = tableHead(doc, PAGE_TOP);
-    }
-
-    const shot = shots[i];
-    if (shot) cover(doc, shot, COLS.thumb, y + 4, 38, 8);
-    else {
-      doc.save().roundedRect(COLS.thumb, y + 4, 38, 38, 8).fill(P.ink50).restore();
-      glyph(doc, 'inquiry-bag.png', COLS.thumb + 11, y + 14, 16);
-    }
-
-    doc
-      .font('Helvetica-Bold')
-      .fontSize(8.5)
-      .fillColor(P.ink900)
-      .text(item.name, COLS.text, y + 11, { width: COLS.textWidth, height: 22, ellipsis: true });
-
-    if (meta) {
-      doc.font('Helvetica').fontSize(7.5).fillColor(P.ink500).text(meta, COLS.text, y + 12 + titleHeight, {
-        width: COLS.textWidth,
-        lineBreak: false,
-        ellipsis: true,
-      });
-    }
-
-    doc.font('Helvetica').fontSize(9).fillColor(P.ink700);
-    doc.text(String(item.quantity), COLS.qty, y + 14, { width: COLS.qtyWidth, align: 'center' });
-    doc.text(money(item.finalPrice), COLS.rate, y + 14, { width: COLS.rateWidth, align: 'right' });
-    doc
-      .font('Helvetica-Bold')
-      .fillColor(P.ink900)
-      .text(money(item.lineTotal), COLS.amount, y + 14, { width: COLS.amountWidth, align: 'right' });
-
-    y += height;
-    if (i < order.items.length - 1) rule(doc, y, P.ink100, 0.7, LEFT + 8, RIGHT - 8);
-  });
-
-  tableBorder(doc, sectionTop, y);
-  return y;
+  return y + HEAD_H;
 }
 
 /**
  * The table's own outline, drawn last: the head is a filled navy block, so the
- * border only has to close the body beneath it — and the body's height is not
- * known until the rows have been laid out.
+ * border only has to close the body beneath it.
  */
 function tableBorder(doc, headTop, bottom) {
   doc
@@ -622,6 +648,45 @@ function tableBorder(doc, headTop, bottom) {
     .strokeColor(P.ink200)
     .stroke()
     .restore();
+}
+
+/* ------------------------------------------------------------------ *
+ * Measurement
+ *
+ * Everything that decides where a page breaks is computed here, before any ink
+ * is laid down. Measuring and drawing in one pass is what made the old layout
+ * reserve the closing blocks' 126pt on every sheet, including the ones that
+ * never carried them.
+ * ------------------------------------------------------------------ */
+
+/**
+ * One row per shipped line. Under the name sits the variant — "Black · M" — and
+ * only the variant: it is what tells one line apart from the other size of the
+ * same product in the same order, which is the question a reader actually brings
+ * to this column. The SKU that used to sit beside it is a warehouse code, and
+ * printing it here spent a line of the row's width on something no shopper reads
+ * and no return needs, since a claim is looked up by order number.
+ *
+ * The variant sits on one line under the name rather than stacking, which is
+ * what keeps a row to 45pt — the height the thumbnail sets the floor at anyway.
+ */
+function measureRows(doc, order, shots) {
+  return order.items.map((item, i) => {
+    const meta = item.variantLabel ? `(${item.variantLabel})` : '';
+
+    doc.font('Helvetica-Bold').fontSize(8.5);
+    // Capped at two lines: a product name is denormalised onto the order and can
+    // be any length an admin typed, and one row is not allowed to grow taller
+    // than the page it has to break against.
+    const titleHeight = Math.min(doc.heightOfString(item.name, { width: COLS.textWidth }), 22);
+    return {
+      item,
+      meta,
+      titleHeight,
+      shot: shots[i],
+      height: Math.max(45, titleHeight + (meta ? 11 : 0) + 17),
+    };
+  });
 }
 
 /**
@@ -641,10 +706,10 @@ function tableBorder(doc, headTop, bottom) {
  * There is no tax line, by decision. `pricing.service.js` charges none, so for
  * anything this system prices the column closes on its own.
  */
-function totals(doc, order, y) {
+const SUMMARY = { x: 320, w: RIGHT - 320 };
+
+function measureSummary(doc, order) {
   const p = order.pricing;
-  const x = 292;
-  const w = RIGHT - x;
   const count = order.items.reduce((sum, item) => sum + item.quantity, 0);
   // Orders placed before `mrpTotal` was stored still carry the gap it was derived from.
   const mrpTotal = p.mrpTotal || p.subtotal + (p.discount || 0);
@@ -660,23 +725,128 @@ function totals(doc, order, y) {
       : { label: 'Delivery Charges', value: 'FREE', tone: P.green700 },
   ].filter(Boolean);
 
-  // The summary moves as one block — a grand total orphaned from its breakdown
-  // is the one break nobody accepts — but it moves only when the paper under the
-  // table genuinely cannot hold it. Not when the footer wanted that space, and
-  // not to keep a bottom margin the rows are given: it may sit flush on the last
-  // line the page allows, and let the closing blocks find their own room.
-  const height = rows.length * 15 + 74 + (savings > 0 ? 14 : 0);
-  if (y + 8 + height > BOTTOM) {
-    doc.addPage();
-    y = PAGE_TOP;
-  } else {
-    y += 8;
+  const words = amountInWords(p.total);
+
+  const savingsLine = savings > 0 ? `You saved ${money(savings)} on this order (MRP ${money(mrpTotal)})` : '';
+
+  // The offsets below are the ones `drawSummary` draws at, read back as heights.
+  const barOffset = rows.length * 15 + 6;
+  const wordsH = doc.font('Helvetica').fontSize(8).heightOfString(words, { width: SUMMARY.w - 28 });
+  let end = Math.max(barOffset + 56, barOffset + 46 + wordsH);
+  if (savingsLine) {
+    end += 4 + doc.font('Helvetica-Bold').fontSize(7.5).heightOfString(savingsLine, { width: SUMMARY.w - 28 });
   }
+
+  return { rows, words, savingsLine, total: p.total, height: Math.max(barOffset + 68, end + 6) };
+}
+
+/**
+ * Which sheet each row and the summary belong on.
+ *
+ * Two rules do the work. A page that ends in the slim page foot may run to
+ * `FLOW_BOTTOM`; the one that carries the summary and the closing blocks stops
+ * at `LAST_BOTTOM`. And when the summary cannot make its own page's cut, it
+ * takes the last line item down with it — a sheet holding nothing but a total
+ * reads as a printing fault, and the row it strands above reads as cut off.
+ */
+function paginate(doc, order, shots) {
+  const rows = measureRows(doc, order, shots);
+  const summary = measureSummary(doc, order);
+
+  const pages = [];
+  let page = { top: TABLE_TOP, rows: [] };
+  let y = TABLE_TOP + HEAD_H;
+
+  const close = () => {
+    page.end = y;
+    pages.push(page);
+  };
+
+  rows.forEach((row) => {
+    if (y + row.height > FLOW_BOTTOM) {
+      close();
+      page = { top: PAGE_TOP, rows: [] };
+      y = PAGE_TOP + HEAD_H;
+    }
+    page.rows.push(row);
+    y += row.height;
+  });
+  close();
+
+  const last = pages[pages.length - 1];
+  if (last.end + SUMMARY_GAP + summary.height <= LAST_BOTTOM) {
+    last.summary = summary;
+    return { pages, summary };
+  }
+
+  // The summary needs a sheet of its own. Carry the final row onto it — one row,
+  // not as many as will fit: emptying the page above to fill the page below
+  // trades one ragged sheet for two.
+  const carried = { top: PAGE_TOP, rows: [], summary };
+  const roomForRows = LAST_BOTTOM - SUMMARY_GAP - summary.height;
+  if (last.rows.length > 1) {
+    const row = last.rows[last.rows.length - 1];
+    if (PAGE_TOP + HEAD_H + row.height <= roomForRows) {
+      carried.rows.push(last.rows.pop());
+      last.end -= row.height;
+    }
+  }
+  carried.end = PAGE_TOP + HEAD_H + carried.rows.reduce((sum, r) => sum + r.height, 0);
+  pages.push(carried);
+
+  return { pages, summary };
+}
+
+/* ------------------------------------------------------------------ *
+ * Drawing
+ * ------------------------------------------------------------------ */
+
+function drawRows(doc, page) {
+  let y = tableHead(doc, page.top);
+
+  page.rows.forEach((row, i) => {
+    const { item, meta, titleHeight, shot } = row;
+
+    if (shot) cover(doc, shot, COLS.thumb, y + 4, 38, 8);
+    else {
+      doc.save().roundedRect(COLS.thumb, y + 4, 38, 38, 8).fill(P.ink50).restore();
+      glyph(doc, 'inquiry-bag.png', COLS.thumb + 11, y + 14, 16);
+    }
+
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(8.5)
+      .fillColor(P.ink900)
+      .text(item.name, COLS.text, y + 11, { width: COLS.textWidth, height: 22, ellipsis: true });
+
+    if (meta) {
+      doc.font('Helvetica').fontSize(7.5).fillColor(P.ink500);
+      oneLine(doc, meta, COLS.text, y + 12 + titleHeight, COLS.textWidth);
+    }
+
+    doc.font('Helvetica').fontSize(9).fillColor(P.ink700);
+    doc.text(String(item.quantity), COLS.qty, y + 14, { width: COLS.qtyWidth, align: 'center' });
+    doc.text(money(item.finalPrice), COLS.rate, y + 14, { width: COLS.rateWidth, align: 'right' });
+    doc
+      .font('Helvetica-Bold')
+      .fillColor(P.ink900)
+      .text(money(item.lineTotal), COLS.amount, y + 14, { width: COLS.amountWidth, align: 'right' });
+
+    y += row.height;
+    if (i < page.rows.length - 1) rule(doc, y, P.ink100, 0.7, LEFT + 8, RIGHT - 8);
+  });
+
+  tableBorder(doc, page.top, y);
+  return y;
+}
+
+function drawSummary(doc, summary, y) {
+  const { rows, words, savingsLine } = summary;
 
   rows.forEach((row, i) => {
     const ry = y + i * 15;
     doc.font('Helvetica').fontSize(9).fillColor(P.ink600);
-    doc.text(row.label, x + 14, ry, { width: 120, lineBreak: false, ellipsis: true });
+    oneLine(doc, row.label, SUMMARY.x + 14, ry, 130);
     doc
       .font('Helvetica')
       .fontSize(9)
@@ -685,48 +855,52 @@ function totals(doc, order, y) {
   });
 
   const barY = y + rows.length * 15 + 6;
-  doc.save().roundedRect(x, barY, w, 28, 7).fill(P.ink900).restore();
+  doc.save().roundedRect(SUMMARY.x, barY, SUMMARY.w, 28, 7).fill(P.ink900).restore();
   doc
     .font('Helvetica-Bold')
     .fontSize(9.5)
     .fillColor(P.white)
-    .text('GRAND TOTAL', x + 14, barY + 9.5, { characterSpacing: 0.6, lineBreak: false });
+    .text('GRAND TOTAL', SUMMARY.x + 14, barY + 9.5, { characterSpacing: 0.6, lineBreak: false });
   doc
     .fontSize(11.5)
-    .text(money(p.total), COLS.amount - 24, barY + 8, { width: COLS.amountWidth + 24, align: 'right' });
+    .text(money(summary.total), COLS.amount - 24, barY + 8, {
+      width: COLS.amountWidth + 24,
+      align: 'right',
+    });
 
   doc
     .font('Helvetica-Bold')
     .fontSize(7.5)
     .fillColor(P.ink900)
-    .text('Amount in Words:', x + 14, barY + 36, { lineBreak: false });
+    .text('Amount in Words:', SUMMARY.x + 14, barY + 36, { lineBreak: false });
   doc
     .font('Helvetica')
     .fontSize(8)
     .fillColor(P.ink600)
-    .text(amountInWords(p.total), x + 14, barY + 46, { width: w - 28 });
+    .text(words, SUMMARY.x + 14, barY + 46, { width: SUMMARY.w - 28 });
 
   // The MRP and the two discounts, stated once, after the sum they are not part of.
-  let end = Math.max(doc.y, barY + 56);
-  if (savings > 0) {
+  if (savingsLine) {
     doc
       .font('Helvetica-Bold')
       .fontSize(7.5)
       .fillColor(P.green700)
-      .text(`You saved ${money(savings)} on this order (MRP ${money(mrpTotal)})`, x + 14, end + 4, {
-        width: w - 28,
-      });
-    end = doc.y;
+      .text(savingsLine, SUMMARY.x + 14, Math.max(doc.y, barY + 56) + 4, { width: SUMMARY.w - 28 });
   }
-
-  return Math.max(barY + 68, end + 6);
 }
 
-/** The four promises, in the order mail's own words and with its own glyphs. */
+/**
+ * The four promises, in the order mail's own words and with its own glyphs.
+ *
+ * Deliberately quiet: it is marketing on a document that is a record of a
+ * transaction, and it is read after the total, not before it. Set a size down
+ * from the invoice proper — smaller discs, smaller type, a lighter band — so it
+ * reads as a strip along the foot rather than a fifth section of the invoice.
+ */
 function trustRow(doc, y) {
   doc
     .save()
-    .roundedRect(LEFT, y, WIDTH, TRUST_H, 10)
+    .roundedRect(LEFT, y, WIDTH, TRUST_H, 8)
     .lineWidth(0.8)
     .fillAndStroke(P.ink50, P.ink200)
     .restore();
@@ -734,19 +908,16 @@ function trustRow(doc, y) {
   const colWidth = WIDTH / 4;
   TRUST.forEach((point, i) => {
     const x = LEFT + i * colWidth;
-    if (i) dashedRule(doc, x, y + 11, x, y + TRUST_H - 11);
+    if (i) dashedRule(doc, x, y + 9, x, y + TRUST_H - 9);
 
-    disc(doc, point.icon, x + 17, y + TRUST_H / 2, 10, P.white, 12);
-    doc
-      .font('Helvetica-Bold')
-      .fontSize(7.5)
-      .fillColor(P.ink900)
-      .text(point.title, x + 31, y + 13, { width: colWidth - 37, lineBreak: false, ellipsis: true });
+    disc(doc, point.icon, x + 16, y + TRUST_H / 2, 8.5, P.white, 10);
+    doc.font('Helvetica-Bold').fontSize(6.8).fillColor(P.ink900);
+    oneLine(doc, point.title, x + 29, y + 10, colWidth - 35);
     doc
       .font('Helvetica')
-      .fontSize(6.5)
+      .fontSize(6)
       .fillColor(P.ink500)
-      .text(point.text, x + 31, y + 24, { width: colWidth - 37, lineGap: 1 });
+      .text(point.text, x + 29, y + 19.5, { width: colWidth - 35, lineGap: 0.5 });
   });
 }
 
@@ -755,36 +926,31 @@ function trustRow(doc, y) {
  * signs off with, the two channels a shopper acts on when something is wrong,
  * the networks to follow when nothing is, and a QR back to the storefront.
  *
- * The chips had been tucked under the phone number, where they read as a third
- * way to raise a support ticket. Under their own "Follow Us" they are what they
- * are. They stay the storefront footer's own marks in the networks' own colours
- * — the same `social-color-*` cuts the email footer uses, so the three footers
- * are one row.
- *
  * Columns are fixed rather than divided evenly: the widest thing in each is a
- * different shape — a line of display serif, an email address, a row of 15pt
+ * different shape — a line of display serif, an email address, a row of 18pt
  * discs, a 46pt square — and four equal quarters would starve the second and
  * waste the fourth.
  */
 const FOOT = {
-  thanks: { x: LEFT, w: 110 },
-  help: { x: 178, w: 140 },
+  thanks: { x: LEFT, w: 116 },
+  help: { x: 172, w: 150 },
   // Wide enough for all five networks at the chip size below, so a store that
   // fills in every profile gets the same row as one that fills in four.
-  social: { x: 338, w: 116 },
-  scan: { x: 474, w: 73 },
+  social: { x: 346, w: 124 },
+  scan: { x: 488, w: RIGHT - 488 },
 };
 
 /** Chip diameter and the pitch they are set on. */
 const CHIP = 18;
 const CHIP_PITCH = 24;
 
+/** The thank-you, the support channels, the networks and the QR. */
 function footer(doc, brand, qr, y) {
   const socials = brand.socials.slice(0, 5);
 
-  dashedRule(doc, 168, y + 2, 168, y + 52);
-  dashedRule(doc, 328, y + 2, 328, y + 52);
-  if (socials.length) dashedRule(doc, 464, y + 2, 464, y + 52);
+  dashedRule(doc, 160, y + 2, 160, y + 52);
+  dashedRule(doc, 334, y + 2, 334, y + 52);
+  if (socials.length) dashedRule(doc, 480, y + 2, 480, y + 52);
 
   /* Thank you */
   const thanks = FOOT.thanks;
@@ -814,28 +980,14 @@ function footer(doc, brand, qr, y) {
   let helpY = y + 18;
   if (brand.supportEmail) {
     glyph(doc, 'inquiry-mail.png', help.x, helpY, 10);
-    doc
-      .font('Helvetica')
-      .fontSize(7.5)
-      .fillColor(P.ink600)
-      .text(`Contact us at ${brand.supportEmail}`, help.x + 14, helpY + 1.5, {
-        width: help.w - 14,
-        lineBreak: false,
-        ellipsis: true,
-      });
+    doc.font('Helvetica').fontSize(7.5).fillColor(P.ink600);
+    oneLine(doc, `Contact us at ${brand.supportEmail}`, help.x + 14, helpY + 1.5, help.w - 14);
     helpY += 14;
   }
   if (brand.supportPhone) {
     glyph(doc, 'inquiry-phone.png', help.x, helpY, 10);
-    doc
-      .font('Helvetica')
-      .fontSize(7.5)
-      .fillColor(P.ink600)
-      .text(`or call us at ${brand.supportPhone}`, help.x + 14, helpY + 1.5, {
-        width: help.w - 14,
-        lineBreak: false,
-        ellipsis: true,
-      });
+    doc.font('Helvetica').fontSize(7.5).fillColor(P.ink600);
+    oneLine(doc, `or call us at ${brand.supportPhone}`, help.x + 14, helpY + 1.5, help.w - 14);
   }
 
   /* Follow us — its own column, and no column at all when nothing is configured. */
@@ -875,57 +1027,46 @@ function footer(doc, brand, qr, y) {
     .fillColor(P.ink500)
     .text('Scan to visit our website', scan.x, y + 47, { width: scan.w, align: 'center', lineBreak: false });
 
-  rule(doc, y + 58, P.ink200, 0.8);
-  doc
-    .font('Helvetica')
-    .fontSize(7.5)
-    .fillColor(P.ink400)
-    .text('This is a computer-generated invoice and does not require a physical signature.', LEFT, y + 66, {
+}
+
+const SIGNATURE = 'This is a computer-generated invoice and does not require a physical signature.';
+
+/**
+ * The line every sheet ends on, and what makes the two feet read as one design
+ * rather than two: the page position on the right, and — on the sheet that
+ * closes the document — the signature note beside it.
+ *
+ * No rule above it and no repeated invoice reference. Both were structure the
+ * page did not need: the reference is already on the meta card at the top, and a
+ * hairline 16pt under a table that has its own border only reads as a second
+ * border. On a continuation page this whole foot costs 16pt where the closing
+ * blocks cost 126, which is the point — the paper it gives back is paper the
+ * item table gets to use.
+ */
+function footLine(doc, page, pages, note = '') {
+  doc.font('Helvetica').fontSize(7).fillColor(P.ink400);
+  if (note) doc.text(note, LEFT, PAGE_FOOT_TEXT, { width: WIDTH, align: 'center', lineBreak: false });
+  // A page count on a one-page invoice answers a question nobody asked.
+  if (pages > 1) {
+    doc.text(`Page ${page} of ${pages}`, LEFT, PAGE_FOOT_TEXT, {
       width: WIDTH,
-      align: 'center',
+      align: 'right',
       lineBreak: false,
     });
+  }
 }
 
 /**
- * Places the two closing blocks under whatever the document ended on.
+ * The closing blocks, on the lines they always sit on.
  *
- * They follow the content rather than sitting at fixed coordinates, so a short
- * invoice leaves its white space at the foot of the page instead of opening a
- * hole between the total and the footer. And they give ground in that order,
- * cheapest thing first, because none of it is worth a second sheet: the trust
- * row — the one decorative block on the page — steps aside, then the gap above
- * closes to `CLOSING_GAP_MIN`. Only when even that will not do does the footer
- * take a page of its own, and there it sits at the foot, where a footer belongs.
+ * They do not chase the end of the content: the trust strip and the footer are
+ * anchored to `TRUST_Y` and `FOOTER_Y`, so the foot of an invoice with two items
+ * is printed exactly where the foot of one with twenty is.
  */
-function closing(doc, brand, qr, contentEnd) {
-  const fits = (gap, trust) => contentEnd + gap + (trust ? TRUST_H + 10 : 0) + FOOTER_H <= BOTTOM;
-
-  let showTrust = true;
-  let y;
-
-  if (fits(CLOSING_GAP, true)) y = contentEnd + CLOSING_GAP;
-  else if (fits(CLOSING_GAP, false)) {
-    showTrust = false;
-    y = contentEnd + CLOSING_GAP;
-  } else if (fits(CLOSING_GAP_MIN, false)) {
-    showTrust = false;
-    y = contentEnd + CLOSING_GAP_MIN;
-  } else {
-    doc.addPage();
-    y = BOTTOM - (TRUST_H + 10 + FOOTER_H);
-  }
-
-  // A page that is nearly full closes flush with its foot rather than leaving a
-  // sliver of paper under the signature line.
-  const block = (showTrust ? TRUST_H + 10 : 0) + FOOTER_H;
-  if (BOTTOM - (y + block) < 40) y = BOTTOM - block;
-
-  if (showTrust) {
-    trustRow(doc, y);
-    y += TRUST_H + 10;
-  }
-  footer(doc, brand, qr, y);
+function closing(doc, brand, qr, pages) {
+  trustRow(doc, TRUST_Y);
+  footer(doc, brand, qr, FOOTER_Y);
+  footLine(doc, pages, pages, SIGNATURE);
 }
 
 /* ------------------------------------------------------------------ *
@@ -933,7 +1074,7 @@ function closing(doc, brand, qr, contentEnd) {
  * ------------------------------------------------------------------ */
 
 /**
- * Streams a printable A4 tax invoice into `res`.
+ * Streams a printable A4 order invoice into `res`.
  *
  * Async on purpose: the branding, the logo, the product shots and the QR are all
  * resolved *before* the first byte is written, because a stream that has already
@@ -971,13 +1112,26 @@ async function streamInvoice(order, res) {
   res.setHeader('Content-Disposition', `attachment; filename="${order.invoiceNumber}.pdf"`);
   doc.pipe(res);
 
-  doc.on('pageAdded', () => drawFrame(doc));
-  drawFrame(doc);
+  // Measured first, drawn second — every page knows how many sheets it is one of
+  // before it is printed, which is what the page counter needs and what lets a
+  // continuation sheet use the paper the closing blocks are not standing on.
+  const { pages } = paginate(doc, order, shots);
 
-  header(doc, brand, logo);
-  titleBlock(doc, order);
-  partiesCard(doc, order);
-  closing(doc, brand, qr, totals(doc, order, itemsTable(doc, order, shots)));
+  pages.forEach((page, i) => {
+    if (i) doc.addPage();
+    if (!i) {
+      header(doc, brand, logo);
+      titleBlock(doc, order);
+      customerCard(doc, order);
+      paymentCard(doc, order);
+    }
+
+    const end = drawRows(doc, page);
+    if (page.summary) drawSummary(doc, page.summary, end + SUMMARY_GAP);
+    else footLine(doc, i + 1, pages.length);
+  });
+
+  closing(doc, brand, qr, pages.length);
 
   doc.end();
 }

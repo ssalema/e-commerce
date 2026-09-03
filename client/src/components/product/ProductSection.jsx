@@ -20,23 +20,29 @@ const FETCH_SIZE = 30;
 /** Stable identity: the reset effect below keys on `products`, so the empty default
  *  must not be a new array on every render. */
 const NO_PRODUCTS = [];
+const NO_IDS = [];
 
 /**
  * A homepage product band: heading, a plain responsive grid, and a "Load more"
  * button — no horizontal scrolling and no arrows.
  *
  * The feed endpoint sends the first ten products of each band with the page. Past
- * that the section pages through /products itself using `moreQuery` — the filter and
- * sort that define the band — so "load more" keeps going until the catalogue is
- * genuinely exhausted rather than until the feed payload runs out. That is also why
- * there is no "View all" link: the whole listing is reachable here, in place.
+ * that the section asks the same server-side rail for its next page by `railKey`, so
+ * the products that arrive are the continuation of *this* band — ranked and filtered
+ * exactly as its first ten were — rather than a listing query that resembles it. A
+ * band with no `railKey` owns its whole list and never asks for more.
+ *
+ * It is also why there is no "View all" link: the whole rail is reachable here, in
+ * place, without losing the shopper's position.
  */
 export default function ProductSection({
   title,
   subtitle,
   products = NO_PRODUCTS,
   loading = false,
-  moreQuery,
+  railKey,
+  railSeen = NO_IDS,
+  total,
   skeletonCount = INITIAL_COUNT,
 }) {
   const { t } = useTranslation();
@@ -45,12 +51,15 @@ export default function ProductSection({
   const [extra, setExtra] = useState([]);
   const [visible, setVisible] = useState(INITIAL_COUNT);
   const [busy, setBusy] = useState(false);
-  // No `moreQuery` means the caller owns the whole list — reveal it and stop.
-  const [exhausted, setExhausted] = useState(!moreQuery);
+  // No `railKey` means the caller owns the whole list — reveal it and stop.
+  const [exhausted, setExhausted] = useState(!railKey);
 
-  // Where the next /products request starts. Counts rows *received*, not rows kept,
-  // so duplicates dropped below are not asked for a second time.
-  const offsetRef = useRef(0);
+  /*
+   * Where the next request into the rail starts: after the rows the feed already sent,
+   * which are that rail's own first page. It counts rows *received*, not rows kept, so
+   * anything dropped as a duplicate below is not asked for a second time.
+   */
+  const offsetRef = useRef(products.length);
 
   /*
    * A refetch (language switch, a live catalogue event) replaces the feed's copy of
@@ -60,9 +69,9 @@ export default function ProductSection({
   useEffect(() => {
     setExtra([]);
     setVisible(INITIAL_COUNT);
-    setExhausted(!moreQuery);
-    offsetRef.current = 0;
-  }, [products, moreQuery]);
+    setExhausted(!railKey);
+    offsetRef.current = products.length;
+  }, [products, railKey]);
 
   const pool = useMemo(() => products.concat(extra), [products, extra]);
 
@@ -76,28 +85,36 @@ export default function ProductSection({
     }
 
     setBusy(true);
+    // The rail hands back a slice of one ordered list, so a repeat should not happen;
+    // this is the belt to that braces, and it also covers the rail being re-ranked
+    // server-side between two clicks.
     const seen = new Set(pool.map((p) => p._id));
     const added = [];
     let done = false;
 
     try {
       while (pool.length + added.length < want && !done) {
-        const res = await productApi.list({
-          ...moreQuery,
-          limit: FETCH_SIZE,
+        const res = await productApi.rail(railKey, {
           offset: offsetRef.current,
+          limit: FETCH_SIZE,
+          seen: railSeen,
         });
         const rows = res?.data?.products || [];
-        const total = res?.meta?.total;
+        const railTotal = res?.meta?.total;
 
         offsetRef.current += rows.length;
-        if (rows.length < FETCH_SIZE || (total != null && offsetRef.current >= total)) done = true;
+        if (rows.length < FETCH_SIZE || (railTotal != null && offsetRef.current >= railTotal)) {
+          done = true;
+        }
 
         rows.forEach((product) => {
           if (seen.has(product._id)) return;
           seen.add(product._id);
           added.push(product);
         });
+
+        // The ceiling the feed sent with the band, in case the rail's own is stale.
+        if (total != null && pool.length + added.length >= total) done = true;
       }
     } catch {
       // A failed page is not worth an error panel under a band that is still full:
@@ -109,7 +126,7 @@ export default function ProductSection({
     setVisible(Math.min(want, pool.length + added.length));
     if (done) setExhausted(true);
     setBusy(false);
-  }, [exhausted, moreQuery, pool, visible]);
+  }, [exhausted, railKey, railSeen, pool, total, visible]);
 
   if (loading) {
     return (
@@ -130,10 +147,20 @@ export default function ProductSection({
   if (!pool.length) return null;
 
   const shown = pool.slice(0, visible);
-  const hasMore = visible < pool.length || !exhausted;
-  // A full batch is what was asked for; the last one on a short catalogue may land
-  // smaller, which shows for the moment the request is in flight and no longer.
-  const incoming = STEP;
+
+  /*
+   * The button is offered only when there is something behind it. `total` is what the
+   * band could ever show, counted server-side against the same filter this component
+   * pages with — a band of two products on a two-product shop therefore never offers
+   * it. Without a `total` (the recently-viewed band, which owns its whole list) the
+   * only question left is whether anything fetched is still hidden.
+   */
+  const remaining = total != null ? total - shown.length : null;
+  const hasMore =
+    shown.length < pool.length || (!exhausted && (remaining == null ? false : remaining > 0));
+
+  // The batch being fetched, never more than what is left to fetch.
+  const incoming = Math.min(STEP, remaining ?? STEP);
 
   return (
     <section className="py-6">

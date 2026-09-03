@@ -12,7 +12,8 @@
     "email:preview": "node scripts/email-preview.js --open",
     "invoice:preview": "node scripts/invoice-preview.js --open",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "migrate:invoiced-at": "node scripts/backfill-invoiced-at.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

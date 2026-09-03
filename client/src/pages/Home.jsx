@@ -18,27 +18,6 @@ import ErrorState from '../components/common/ErrorState';
 import SectionError from '../components/common/SectionError';
 
 /**
- * How each band continues past the ten products the feed sends with the page: the
- * filter and sort "Load more" pages through.
- *
- * These are module-level constants because <ProductSection> treats a new `moreQuery`
- * as a new band and resets what it has paged in; rebuilding the object per render
- * would throw the shopper's "load more" away on every re-render.
- *
- * "For You" is personalised and has no paginated equivalent, so it continues from
- * the closest honest thing: what is selling.
- */
-const SECTION_QUERIES = {
-  for_you: { sort: 'popular' },
-  top_selling: { sort: 'popular' },
-  new_arrivals: { sort: 'newest' },
-  best_deals: { minDiscount: 10, sort: 'discount' },
-  top_rated: { sort: 'rating' },
-};
-
-const DEFAULT_SECTION_QUERY = { sort: 'newest' };
-
-/**
  * The home page is three independent loads — banners, the category taxonomy and the
  * product rails — and they are kept independent on purpose: one of them failing
  * leaves the other two on screen, each reporting only itself.
@@ -237,7 +216,13 @@ export default function Home() {
               title={t(`home.sections.${section.key}.title`, section.title)}
               subtitle={t(`home.sections.${section.key}.subtitle`, section.subtitle)}
               products={section.products}
-              moreQuery={SECTION_QUERIES[section.key] || DEFAULT_SECTION_QUERY}
+              /* Each band continues from the server-side rail it opened with — the
+                 same ranking, the same filter, the same personalisation — so "load
+                 more" appends what comes next in *this* band rather than the next
+                 page of a listing query that merely resembles it. */
+              railKey={section.key}
+              railSeen={recentIds}
+              total={section.total}
             />
           </div>
         ))
@@ -247,7 +232,7 @@ export default function Home() {
           browser already had, so a failure just leaves it out rather than asking
           the shopper to do anything about it. */}
       {/* Grid like every band above it — the homepage reads as one layout rather
-          than a grid page with one rail left over. It has no `moreQuery` because the
+          than a grid page with one rail left over. It has no `railKey` because the
           list is finite by definition: it is what this browser remembers. */}
       {recentProducts.length > 0 && (
         <ProductSection

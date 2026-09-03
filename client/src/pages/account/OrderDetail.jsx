@@ -13,6 +13,7 @@ import {
   ORDER_CLOSED_STATUSES,
   ORDER_STATUS_STEPS,
   RETURN_OPEN_STATUSES,
+  showInvoiceAction,
 } from '../../utils/constants';
 import useSettings from '../../settings/useSettings';
 import { orderTotals } from '../../utils/pricing';
@@ -221,7 +222,18 @@ export default function OrderDetail() {
     order.orderStatus !== 'pending' &&
     order.orderStatus !== 'delivered' &&
     !ORDER_CLOSED_STATUSES.includes(order.orderStatus);
-  const invoiceAvailable = order.paymentStatus === 'paid' || order.paymentMethod === 'cod';
+  /*
+   * The invoice, on the API's verdict rather than one recomputed here — the same
+   * arrangement as the return policy below, and for the same reason.
+   *
+   * The rule it answers with depends on how the order is paid, because the two
+   * methods settle at opposite ends of the journey: a prepaid order has its
+   * invoice from the moment the payment lands, and a COD order — which is not
+   * paid until the doorstep — has it from dispatch, since that is when the goods
+   * were actually supplied.
+   */
+  const invoiceAvailable = Boolean(data?.data?.invoiceAvailable);
+  const showInvoice = showInvoiceAction(order, invoiceAvailable);
 
   /*
    * Returns. The API answers with its own verdict on this order — computed by the
@@ -279,8 +291,12 @@ export default function OrderDetail() {
         </div>
 
         <div className="mt-4 flex flex-wrap gap-3 border-t border-ink-100 pt-4">
-          {invoiceAvailable && (
-            <button type="button" onClick={downloadInvoice} className="btn-outline">
+          {showInvoice && (
+            <button
+              type="button"
+              onClick={() => (invoiceAvailable ? downloadInvoice() : setDialog('invoiceBlocked'))}
+              className="btn-outline"
+            >
               <Icon name="download" size={16} />
               {t('detail.downloadInvoice')}
             </button>
@@ -551,11 +567,6 @@ export default function OrderDetail() {
         onClose={() => setDialog(null)}
         title={t('detail.returnBlockedTitle')}
         size="sm"
-        footer={
-          <button type="button" onClick={() => setDialog(null)} className="btn-primary">
-            {t('common:actions.close')}
-          </button>
-        }
       >
         <div className="flex items-start gap-3">
           <Icon name="info" size={18} className="mt-0.5 shrink-0 text-brand-600" />
@@ -590,6 +601,22 @@ export default function OrderDetail() {
               status: t(`common:orderStatus.${order.orderStatus}`),
             })}
           </p>
+        </div>
+      </Modal>
+
+      {/* What the COD invoice button opens while the order is still in the
+          warehouse: the invoice is coming, and this says when. Brand blue rather
+          than the danger red the cancellation refusal wears — nothing has gone
+          wrong here, the shopper is simply early. */}
+      <Modal
+        open={dialog === 'invoiceBlocked'}
+        onClose={() => setDialog(null)}
+        title={t('detail.invoiceBlockedTitle')}
+        size="sm"
+      >
+        <div className="flex items-start gap-3">
+          <Icon name="info" size={18} className="mt-0.5 shrink-0 text-brand-600" />
+          <p className="text-sm text-ink-600">{t('detail.invoiceBlockedMessage')}</p>
         </div>
       </Modal>
     </div>

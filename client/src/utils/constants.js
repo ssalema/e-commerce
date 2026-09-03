@@ -56,6 +56,30 @@ export const CUSTOMER_CANCELLABLE_STATUSES = ['confirmed', 'packed'];
 /** Statuses that end an order — nothing follows them on the timeline. */
 export const ORDER_CLOSED_STATUSES = ['cancelled', 'returned'];
 
+/**
+ * Whether to draw the Download Invoice action at all, given the API's verdict on
+ * whether the invoice actually exists yet (`invoiceAvailable` on the order
+ * response, computed by the same function the invoice endpoint enforces with).
+ *
+ * The two answers differ only for a COD order still in the warehouse. There the
+ * button stays on screen and explains itself on click — the arrangement the
+ * cancel window above describes, and for the same reason: an absent button says
+ * only that something is missing, not that it is coming. A COD invoice is
+ * raised at dispatch, so it *is* coming, and that is worth a sentence.
+ *
+ * A prepaid order gets no such state: its invoice arrives with the payment, so
+ * there is nothing to wait for and nothing to narrate. A cancelled COD order
+ * gets none either — no invoice is ever coming, so there is nothing to promise.
+ *
+ * Lives here rather than in either page because both pages ask it, and a button
+ * that appears on one screen and not the other is the inconsistency this exists
+ * to prevent.
+ */
+export function showInvoiceAction(order, invoiceAvailable) {
+  if (invoiceAvailable) return true;
+  return order?.paymentMethod === 'cod' && order?.orderStatus !== 'cancelled';
+}
+
 export const ORDER_STATUS_STYLES = {
   pending: 'bg-amber-50 text-amber-700 ring-amber-200',
   confirmed: 'bg-brand-50 text-brand-700 ring-brand-200',

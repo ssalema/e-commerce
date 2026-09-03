@@ -73,6 +73,8 @@
     "placedOn": "{{date}} को दिया गया",
     "downloadInvoice": "इनवॉइस डाउनलोड करें",
     "invoiceUnavailable": "इनवॉइस अभी उपलब्ध नहीं है",
+    "invoiceBlockedTitle": "इनवॉइस अभी उपलब्ध नहीं",
+    "invoiceBlockedMessage": "आपका COD इनवॉइस तब तैयार होगा जब आपका पार्सल हमारे गोदाम से भेजा जाएगा।",
     "cancelOrder": "ऑर्डर रद्द करें",
     "cancelled": "ऑर्डर रद्द हुआ",
     "cancelFailed": "यह ऑर्डर रद्द नहीं हो सका",

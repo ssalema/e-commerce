@@ -1,20 +1,26 @@
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import toast from 'react-hot-toast';
 import { orderApi } from '../api/endpoints';
 import useFetch from '../hooks/useFetch';
 import { useLiveRefetch, useRealtimeRoom } from '../realtime/useRealtime';
 import { ORDER_EVENTS, rooms } from '../realtime/events';
 import { formatPrice, formatDate, optimisedImage } from '../utils/format';
 import { getAccessToken } from '../api/client';
+import { showInvoiceAction } from '../utils/constants';
 import Seo from '../components/common/Seo';
 import Icon from '../components/common/Icon';
 import { OrderSuccessSkeleton } from '../components/common/Skeleton';
 import ErrorState from '../components/common/ErrorState';
+import Modal from '../components/common/Modal';
 
 export default function OrderSuccess() {
-  const { t } = useTranslation(['checkout', 'common']);
+  // The account namespace is pulled in for one string: the invoice failure
+  // message, which the order-detail page owns.
+  const { t } = useTranslation(['checkout', 'common', 'account']);
   const { id } = useParams();
+  const [dialog, setDialog] = useState(null);
   const { data, loading, error, refetch } = useFetch(
     useCallback(() => orderApi.detail(id), [id]),
     [id]
@@ -34,19 +40,25 @@ export default function OrderSuccess() {
    * Fetch it as a blob and hand the browser an object URL.
    */
   const downloadInvoice = async () => {
-    const response = await fetch(orderApi.invoiceUrl(id), {
-      headers: { Authorization: `Bearer ${getAccessToken()}` },
-      credentials: 'include',
-    });
-    if (!response.ok) return;
+    try {
+      const response = await fetch(orderApi.invoiceUrl(id), {
+        headers: { Authorization: `Bearer ${getAccessToken()}` },
+        credentials: 'include',
+      });
+      // Was a bare `return`: the click did nothing at all and said nothing about
+      // it. The button is gated now, so reaching here means a real failure.
+      if (!response.ok) throw new Error(t('account:detail.invoiceUnavailable'));
 
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${order.invoiceNumber}.pdf`;
-    link.click();
-    URL.revokeObjectURL(url);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${order.invoiceNumber}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(err.message);
+    }
   };
 
   if (loading) return <OrderSuccessSkeleton />;
@@ -60,6 +72,19 @@ export default function OrderSuccess() {
   }
 
   const isPaid = order.paymentStatus === 'paid';
+  /*
+   * The API's verdict on whether the invoice exists, and the shared rule for
+   * whether to offer the action at all — the same pair the order-detail page
+   * uses, so the button a shopper sees here is the button they see there.
+   *
+   * A prepaid shopper has just paid, so their invoice is ready and downloads. A
+   * COD shopper is minutes from checkout and theirs is raised at dispatch, so
+   * the button is on offer and says so. It was rendered unconditionally before,
+   * which handed that shopper a button that could not work and said nothing
+   * when it didn't.
+   */
+  const invoiceAvailable = Boolean(data?.data?.invoiceAvailable);
+  const showInvoice = showInvoiceAction(order, invoiceAvailable);
 
   return (
     <>
@@ -155,10 +180,16 @@ export default function OrderSuccess() {
               <Link to={`/account/orders/${order._id}`} className="btn-primary flex-1">
                 {t('success.trackOrder')}
               </Link>
-              <button type="button" onClick={downloadInvoice} className="btn-outline flex-1">
-                <Icon name="download" size={16} />
-                {t('success.downloadInvoice')}
-              </button>
+              {showInvoice && (
+                <button
+                  type="button"
+                  onClick={() => (invoiceAvailable ? downloadInvoice() : setDialog('invoiceBlocked'))}
+                  className="btn-outline flex-1"
+                >
+                  <Icon name="download" size={16} />
+                  {t('success.downloadInvoice')}
+                </button>
+              )}
               <Link to="/products" className="btn-ghost flex-1">
                 {t('cart.continueShopping')}
               </Link>
@@ -166,6 +197,21 @@ export default function OrderSuccess() {
           </div>
         </div>
       </div>
+
+      {/* The same dialog, the same copy and the same brand-blue info mark the
+          order-detail page opens from the same button. A COD shopper meets this
+          explanation here first and recognises it there later. */}
+      <Modal
+        open={dialog === 'invoiceBlocked'}
+        onClose={() => setDialog(null)}
+        title={t('account:detail.invoiceBlockedTitle')}
+        size="sm"
+      >
+        <div className="flex items-start gap-3">
+          <Icon name="info" size={18} className="mt-0.5 shrink-0 text-brand-600" />
+          <p className="text-sm text-ink-600">{t('account:detail.invoiceBlockedMessage')}</p>
+        </div>
+      </Modal>
     </>
   );
 }

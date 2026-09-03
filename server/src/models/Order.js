@@ -174,6 +174,47 @@ function returnEligibility(order, windowDays, now = new Date()) {
   };
 }
 
+/**
+ * The statuses a COD order's invoice exists for.
+ *
+ * COD is the case where payment cannot be the trigger: no money arrives until
+ * the parcel is handed over, so waiting for it would mean a COD order had no
+ * invoice right up to the doorstep — and the invoice is what travels in the box.
+ * Dispatch is the moment instead: goods have been supplied, which is what an
+ * invoice records. Before that there is nothing to invoice, and the old rule
+ * handed a COD shopper one seconds after checkout for goods nobody had picked.
+ *
+ * `returned` stays in the set: the shopper still needs the invoice of an order
+ * they sent back, for their own records and to chase the refund. `cancelled` is
+ * out — nothing was ever supplied, so there is nothing to invoice.
+ */
+const INVOICEABLE_STATUSES = ['shipped', 'out_for_delivery', 'delivered', 'returned'];
+
+/**
+ * Payment states that mean the money actually arrived at some point. A refund
+ * does not un-issue an invoice, so an order on its way back — or already
+ * refunded — keeps the document it was supplied under.
+ */
+const SETTLED_PAYMENTS = ['paid', 'refund_pending', 'refunded'];
+
+/**
+ * Whether this order has an invoice yet.
+ *
+ * Two rules, because the two payment methods settle at opposite ends of the
+ * journey. A prepaid order is paid before anything is picked, so its invoice
+ * exists from the moment the payment lands — a shopper who has handed over money
+ * should not have to wait on a warehouse for their receipt. A COD order is paid
+ * at the door, so payment cannot gate it and dispatch does instead.
+ *
+ * Both front-ends mirror this to decide what to draw; the invoice endpoint is
+ * what enforces it, and it is the only check a direct API call cannot walk around.
+ */
+function invoiceAvailable(order) {
+  if (!order) return false;
+  if (order.paymentMethod === 'cod') return INVOICEABLE_STATUSES.includes(order.orderStatus);
+  return SETTLED_PAYMENTS.includes(order.paymentStatus);
+}
+
 const PAYMENT_STATUSES = ['pending', 'paid', 'failed', 'refund_pending', 'refunded'];
 
 /**
@@ -380,6 +421,18 @@ const orderSchema = new mongoose.Schema(
     },
 
     invoiceNumber: String,
+    /**
+     * When the invoice was first issued — the moment its PDF was generated for
+     * the first time, stamped by the download endpoint and never rewritten. The
+     * number above it is reserved at checkout alongside the order number, but a
+     * number is not an issued document: the invoice only exists once payment has
+     * settled and someone asks for it, which can be days later for a COD order.
+     *
+     * Absent on every order placed before this field existed, and on any order
+     * whose invoice has never been downloaded. The invoice falls back to
+     * `createdAt` for those rather than printing a blank date.
+     */
+    invoicedAt: Date,
     notes: String,
   },
   { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
@@ -409,25 +462,48 @@ orderSchema.virtual('returnStatus').get(function returnStatus() {
 });
 
 /**
- * The Indian financial year an instant falls in, as its two two-digit years:
- * "2627" for 1 Apr 2026 – 31 Mar 2027. Jan–Mar belong to the year before.
+ * The Indian financial year an instant falls in, written as its two two-digit
+ * years: "26-27" for 1 Apr 2026 – 31 Mar 2027. Jan–Mar belong to the year before.
  */
 function financialYearCode(date) {
   const month = date.getMonth(); // 0-based, so 3 is April
   const startYear = month >= 3 ? date.getFullYear() : date.getFullYear() - 1;
-  return `${String(startYear).slice(2)}${String(startYear + 1).slice(2)}`;
+  return `${String(startYear).slice(2)}-${String(startYear + 1).slice(2)}`;
+}
+
+/** The counter bucket an order placed at `date` draws its serial from. */
+function counterKeyFor(date) {
+  return `order:fy:${financialYearCode(date)}`;
 }
 
 /**
- * ORD<fy><5 digit serial> — "ORD262700001" is the first order of FY 2026-27,
- * which runs 1 Apr 2026 to 31 Mar 2027.
+ * ORD<yy>-<yy><mm><5 digit serial> — "ORD26-270900001" is order 1 of FY 2026-27,
+ * placed in September 2026. The FY runs 1 Apr 2026 to 31 Mar 2027.
  *
- * The serial is a per-financial-year counter, so it is the running order count
- * for the year rather than an opaque id: readable over the phone, sortable as
- * text, and it lines the numbering up with the books, so a year's orders are a
- * contiguous run at audit time. The invoice takes the same serial under an INV
- * prefix, keeping the pair obviously related.
+ * Two independent parts, and it matters that they move at different rates:
+ *   - <mm> is the calendar month the order was placed, so it changes every month.
+ *   - the serial is a per-financial-year counter, so it is the running order
+ *     count for the year rather than an opaque id, and it restarts at 00001 only
+ *     on 1 April. It does NOT restart when the month rolls over — Sept's first
+ *     order continues August's count.
  *
+ * That keeps the number readable over the phone, sortable as text within a year,
+ * and lined up with the books, so a year's orders are a contiguous run at audit
+ * time. The invoice takes the same serial under an INV prefix, keeping the pair
+ * obviously related.
+ */
+function formatNumbers(date, seq) {
+  const fy = financialYearCode(date);
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const serial = String(seq).padStart(5, '0');
+
+  return {
+    orderNumber: `ORD${fy}${mm}${serial}`,
+    invoiceNumber: `INV${fy}${mm}${serial}`,
+  };
+}
+
+/**
  * The counter is claimed inside whatever session the save is running under, so a
  * checkout that aborts (out of stock, payment never started) returns its number.
  */
@@ -435,12 +511,12 @@ orderSchema.pre('validate', async function assignNumbers(next) {
   if (!this.isNew || this.orderNumber) return next();
 
   try {
-    const fy = financialYearCode(new Date());
-    const seq = await Counter.next(`order:fy:${fy}`, this.$session());
-    const serial = String(seq).padStart(5, '0');
+    const now = new Date();
+    const seq = await Counter.next(counterKeyFor(now), this.$session());
+    const { orderNumber, invoiceNumber } = formatNumbers(now, seq);
 
-    this.orderNumber = `ORD${fy}${serial}`;
-    this.invoiceNumber = `INV${fy}${serial}`;
+    this.orderNumber = orderNumber;
+    this.invoiceNumber = invoiceNumber;
     return next();
   } catch (err) {
     return next(err);
@@ -461,6 +537,9 @@ orderSchema.statics.RETURN_FLOW = RETURN_FLOW;
 orderSchema.statics.RETURN_OPEN = RETURN_OPEN;
 orderSchema.statics.RETURN_CLOSED = RETURN_CLOSED;
 orderSchema.statics.returnEligibility = returnEligibility;
+orderSchema.statics.INVOICEABLE_STATUSES = INVOICEABLE_STATUSES;
+orderSchema.statics.SETTLED_PAYMENTS = SETTLED_PAYMENTS;
+orderSchema.statics.invoiceAvailable = invoiceAvailable;
 orderSchema.statics.canTransitionReturn = (from, to) => Boolean(RETURN_FLOW[from]?.includes(to));
 
 module.exports = mongoose.model('Order', orderSchema);
@@ -478,3 +557,6 @@ module.exports.RETURN_FLOW = RETURN_FLOW;
 module.exports.RETURN_OPEN = RETURN_OPEN;
 module.exports.RETURN_CLOSED = RETURN_CLOSED;
 module.exports.returnEligibility = returnEligibility;
+module.exports.INVOICEABLE_STATUSES = INVOICEABLE_STATUSES;
+module.exports.SETTLED_PAYMENTS = SETTLED_PAYMENTS;
+module.exports.invoiceAvailable = invoiceAvailable;

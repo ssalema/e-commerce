@@ -66,6 +66,12 @@ async function buildFilter(query, { isAdmin = false } = {}) {
 
   if (query.minDiscount) filter.discountPercent = { $gte: Number(query.minDiscount) };
   if (query.minRating) filter['ratings.average'] = { $gte: Number(query.minRating) };
+  /*
+   * "Has been reviewed at all", which is not the same question as `minRating` and is
+   * what the Top Rated rail is built from — an unreviewed product has an average of
+   * 0 and would otherwise sit in the same bucket as a badly reviewed one.
+   */
+  if (query.rated === 'true') filter['ratings.count'] = { $gt: 0 };
 
   if (query.availability === 'in_stock') filter.stock = { $gt: 0 };
   if (query.availability === 'out_of_stock') filter.stock = { $lte: 0 };
@@ -344,45 +350,121 @@ exports.getProductsByIds = asyncHandler(async (req, res) => {
  * recently-viewed ids the browser already keeps — so a signed-out visitor, which
  * is most of them, still gets a rail shaped by what they have been looking at.
  */
-exports.getHomeFeed = asyncHandler(async (req, res) => {
-  const base = { status: 'published' };
-  const select = LIST_FIELDS;
+/** Products sent per rail with the page. The storefront shows ten of them at a time. */
+const RAIL_SIZE = 10;
 
-  const seenIds = String(req.query.seen || '')
+/**
+ * The three rails that are plain catalogue reads, defined once and shared by the feed
+ * and by the paging endpoint below.
+ *
+ * They are one definition on purpose. When the homepage sent the first ten rows and
+ * the storefront then paged the *listing* endpoint with its own approximation of the
+ * same filter and sort, the two drifted: "Top Rated" opened on average alone and
+ * continued on average-then-count, so load more could repeat a product or skip one.
+ *
+ * Every sort ends on `_id` for the same reason — a sort with ties has no defined order
+ * between two pages of it, and skip/limit paging over an undefined order loses rows.
+ */
+const STATIC_RAILS = {
+  new_arrivals: {
+    title: 'New Arrivals',
+    subtitle: 'Fresh in store',
+    filter: { status: 'published' },
+    sort: { createdAt: -1, _id: -1 },
+  },
+  best_deals: {
+    title: 'Best Deals',
+    subtitle: 'Biggest discounts right now',
+    filter: { status: 'published', discountPercent: { $gte: 10 } },
+    sort: { discountPercent: -1, _id: -1 },
+  },
+  top_rated: {
+    title: 'Top Rated',
+    subtitle: 'Loved by our customers',
+    // "Has been reviewed at all" — an unreviewed product averages 0 and would
+    // otherwise rank alongside a badly reviewed one.
+    filter: { status: 'published', 'ratings.count': { $gt: 0 } },
+    sort: { 'ratings.average': -1, 'ratings.count': -1, _id: -1 },
+  },
+};
+
+/** The computed rails, in the order the homepage stacks them, plus their copy. */
+const COMPUTED_RAILS = {
+  for_you: { title: 'Products For You', subtitle: 'Handpicked for your taste' },
+  top_selling: { title: 'Top Selling Products', subtitle: 'What everyone is buying' },
+};
+
+/** Rail order on the homepage: personalised, then popular, then the catalogue reads. */
+const RAIL_ORDER = ['for_you', 'top_selling', 'new_arrivals', 'best_deals', 'top_rated'];
+
+const parseSeenIds = (raw) =>
+  String(raw || '')
     .split(',')
     .map((id) => id.trim())
     .filter((id) => mongoose.isValidObjectId(id))
     .slice(0, 20);
 
-  /*
-   * Top Selling is resolved before "For You" so its ids can be held out of that rail —
-   * two rails stacked on the homepage showing the same five products is the thing that
-   * made the manual flags look broken in the first place.
-   *
-   * Only "For You" waits on it, though. The other three rails are plain sorted reads
-   * that depend on nothing, so they are launched here rather than after — awaiting
-   * them behind Top Selling made every homepage pay two serial round trips to the
-   * database where one would do, and against a remote cluster a round trip is the
-   * dominant cost of this endpoint.
-   */
-  const staticRails = Promise.all([
-    Product.find(base).select(select).sort({ createdAt: -1 }).limit(10).lean({ virtuals: true }),
-    Product.find({ ...base, discountPercent: { $gte: 10 } }).select(select).sort({ discountPercent: -1 }).limit(10).lean({ virtuals: true }),
-    Product.find({ ...base, 'ratings.count': { $gt: 0 } }).select(select).sort({ 'ratings.average': -1 }).limit(10).lean({ virtuals: true }),
-  ]);
+/**
+ * One page of one rail — the single place any rail is ever built, so the products the
+ * homepage opens with and the products "load more" appends are drawn from the same
+ * ranking or the same query, never from two that merely resemble each other.
+ *
+ * Returns `{ products, total }`, where `total` is what this rail could ever show:
+ * the depth of the ranking for the computed pair, a count against the same filter for
+ * the rest. The storefront offers "load more" only while `total` says there is more.
+ */
+async function loadRail(key, { offset = 0, limit = RAIL_SIZE, seenIds = [], userId } = {}) {
+  if (key === 'top_selling') {
+    return recommendations.getTopSelling({ select: LIST_FIELDS, limit, offset });
+  }
 
-  const topSelling = await recommendations.getTopSelling({ select, limit: 10 });
-
-  const [forYou, [newArrivals, bestDeals, topRated]] = await Promise.all([
-    recommendations.getForYou({
-      userId: req.user?._id,
+  if (key === 'for_you') {
+    /*
+     * Held out of the personalised rail: two rails stacked on the homepage showing the
+     * same five products is the thing that made the manual flags look broken. The
+     * exclusion is the *visible* head of Top Selling, taken from its cached ranking, so
+     * every page of "For You" is built against the same held-out set.
+     */
+    const excludeIds = (await recommendations.rankTopSelling()).slice(0, RAIL_SIZE);
+    return recommendations.getForYou({
+      userId,
       seenIds,
-      excludeIds: topSelling.map((p) => p._id),
-      select,
-      limit: 10,
-    }),
-    staticRails,
+      excludeIds,
+      select: LIST_FIELDS,
+      limit,
+      offset,
+    });
+  }
+
+  const def = STATIC_RAILS[key];
+  if (!def) return null;
+
+  const [products, total] = await Promise.all([
+    Product.find(def.filter)
+      .select(LIST_FIELDS)
+      .sort(def.sort)
+      .skip(offset)
+      .limit(limit)
+      .lean({ virtuals: true }),
+    Product.countDocuments(def.filter),
   ]);
+
+  return { products, total };
+}
+
+exports.getHomeFeed = asyncHandler(async (req, res) => {
+  const seenIds = parseSeenIds(req.query.seen);
+  const userId = req.user?._id;
+
+  /*
+   * Every rail at once. "For You" needs Top Selling's ranking to exclude it, but that
+   * ranking is cached and single-flighted inside the service, so the two resolve it
+   * together rather than one waiting on the other — against a remote cluster a serial
+   * round trip is the dominant cost of this endpoint.
+   */
+  const rails = await Promise.all(
+    RAIL_ORDER.map((key) => loadRail(key, { seenIds, userId, limit: RAIL_SIZE }))
+  );
 
   const lang = req.language;
 
@@ -392,22 +474,51 @@ exports.getHomeFeed = asyncHandler(async (req, res) => {
    * title/subtitle still ride along as a fallback for any client that has not been
    * updated — but the storefront never displays them.
    *
-   * Empty rails are dropped below, which on a brand-new catalogue is every rail;
-   * the two computed ones fill themselves as long as a single product is published.
+   * Empty rails are dropped, which on a brand-new catalogue is every rail; the two
+   * computed ones fill themselves as long as a single product is published.
    */
   return sendSuccess(res, {
     message: 'Home feed fetched',
     data: {
-      sections: [
-        { key: 'for_you', title: 'Products For You', subtitle: 'Handpicked for your taste', products: forYou },
-        { key: 'top_selling', title: 'Top Selling Products', subtitle: 'What everyone is buying', products: topSelling },
-        { key: 'new_arrivals', title: 'New Arrivals', subtitle: 'Fresh in store', products: newArrivals },
-        { key: 'best_deals', title: 'Best Deals', subtitle: 'Biggest discounts right now', products: bestDeals },
-        { key: 'top_rated', title: 'Top Rated', subtitle: 'Loved by our customers', products: topRated },
-      ]
+      sections: RAIL_ORDER.map((key, i) => {
+        const { title, subtitle } = COMPUTED_RAILS[key] || STATIC_RAILS[key];
+        const { products, total } = rails[i];
+        return { key, title, subtitle, products, total };
+      })
         .filter((s) => s.products.length > 0)
         .map((s) => ({ ...s, products: localizeProducts(s.products, lang) })),
     },
+  });
+});
+
+/**
+ * GET /products/rail/:key — the rest of a homepage rail, one page at a time.
+ *
+ * This exists so "load more" continues a rail *as that rail*, which the listing
+ * endpoint cannot do: "Top Selling" is ninety days of order volume and "For You" is
+ * one shopper's affinity, and neither is expressible as a sort on /products. Paging
+ * them there returned a differently-ordered list that repeated and skipped products.
+ */
+exports.getRail = asyncHandler(async (req, res) => {
+  const key = String(req.params.key || '');
+  const { limit, skip } = parsePaging(req.query, RAIL_SIZE);
+
+  const rail = await loadRail(key, {
+    offset: skip,
+    limit,
+    seenIds: parseSeenIds(req.query.seen),
+    userId: req.user?._id,
+  });
+  if (!rail) throw new ApiError(404, 'Unknown rail');
+
+  return sendSuccess(res, {
+    message: 'Rail fetched',
+    data: { products: localizeProducts(rail.products, req.language) },
+    meta: paginationMeta({
+      total: rail.total,
+      page: Math.floor(skip / limit) + 1,
+      limit,
+    }),
   });
 });
 
