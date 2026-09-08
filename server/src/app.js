@@ -76,11 +76,19 @@ app.use(
 
 /**
  * The Razorpay webhook signature is computed over the exact raw bytes, so it must be
- * mounted before express.json() replaces the body with a parsed object.
+ * mounted before express.json() replaces the body with a parsed object — a parsed
+ * object re-serialised is not byte-identical and the HMAC would never match again.
+ *
+ * `type: () => true` rather than 'application/json': the body is captured whatever
+ * content type arrives, so a delivery with an unexpected header fails the signature
+ * check (which is a real, logged rejection) instead of silently reaching the handler
+ * with an empty object. It is also mounted ahead of the rate limiter — Razorpay
+ * bursts retries from a small pool of IPs, and a 429 there reads to it as a failed
+ * delivery worth retrying harder.
  */
 app.post(
   `${env.apiPrefix}/payments/webhook`,
-  express.raw({ type: 'application/json' }),
+  express.raw({ type: () => true, limit: '1mb' }),
   (req, _res, next) => {
     req.rawBody = req.body;
     next();

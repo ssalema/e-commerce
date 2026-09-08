@@ -20,6 +20,7 @@ module.exports = {
   ReactivationRequest: require('./ReactivationRequest'),
   AccountAudit: require('./AccountAudit'),
   Payment: require('./Payment'),
+  WebhookEvent: require('./WebhookEvent'),
   Setting: require('./Setting'),
   Inquiry: require('./Inquiry'),
   NewsletterSubscriber: require('./NewsletterSubscriber'),

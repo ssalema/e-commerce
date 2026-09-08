@@ -13,7 +13,8 @@
     "invoice:preview": "node scripts/invoice-preview.js --open",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "migrate:invoiced-at": "node scripts/backfill-invoiced-at.js"
+    "migrate:invoiced-at": "node scripts/backfill-invoiced-at.js",
+    "webhook:test": "node scripts/webhook-test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

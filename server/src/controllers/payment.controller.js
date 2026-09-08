@@ -1,19 +1,35 @@
+const crypto = require('crypto');
 const asyncHandler = require('../utils/asyncHandler');
 const ApiError = require('../utils/ApiError');
-const { sendSuccess } = require('../utils/apiResponse');
-const { Order, Payment, Cart } = require('../models');
+const { sendSuccess, paginationMeta } = require('../utils/apiResponse');
+const { Order, Payment, Cart, WebhookEvent } = require('../models');
+const env = require('../config/env');
 const { releaseStock } = require('../services/inventory.service');
 const { redeemForOrder, releaseForOrder } = require('../services/coupon.service');
 const razorpay = require('../services/razorpay.service');
+const razorpayWebhook = require('../services/razorpayWebhook.service');
 const mailService = require('../services/mail.service');
 const broadcast = require('../realtime/broadcast');
 const logger = require('../utils/logger');
 
-/** GET /payments/config — public key + enabled flag for the checkout widget. */
+/**
+ * GET /payments/config — public key + enabled flag for the checkout widget.
+ *
+ * `downtime` is whatever the downtime webhooks last reported as broken. Checkout
+ * uses it to say "UPI is having trouble right now" *before* the shopper picks it,
+ * which turns a failed payment they cannot explain into a choice they can make.
+ * It is empty whenever those events are not subscribed to, and checkout simply
+ * shows no warning — nothing depends on it being there.
+ */
 exports.getConfig = asyncHandler(async (_req, res) =>
   sendSuccess(res, {
     message: 'Payment config fetched',
-    data: { enabled: razorpay.isEnabled(), keyId: razorpay.keyId || null, currency: 'INR' },
+    data: {
+      enabled: razorpay.isEnabled(),
+      keyId: razorpay.keyId || null,
+      currency: 'INR',
+      downtime: razorpayWebhook.getActiveDowntimes(),
+    },
   })
 );
 
@@ -186,120 +202,219 @@ exports.recordFailure = asyncHandler(async (req, res) => {
 });
 
 /**
- * POST /payments/webhook — Razorpay server-to-server callback. Mounted before the
- * JSON body parser so the raw buffer is available for signature verification.
+ * POST /payments/webhook — Razorpay's server-to-server callback.
+ *
+ * This is the authoritative account of what happened to the money. The browser's
+ * /payments/verify call is faster and is what the shopper watches, but it only
+ * exists while their tab does; this arrives regardless, is retried until it is
+ * acknowledged, and is the only channel that reports refunds, chargebacks and
+ * gateway downtime at all.
+ *
+ * Four things happen here and nothing else — the meaning of each event lives in
+ * razorpayWebhook.service:
+ *
+ *   1. Verify the HMAC over the *raw* bytes. app.js mounts express.raw ahead of the
+ *      JSON parser for this one path precisely so those bytes still exist: re-
+ *      serialising a parsed object reorders keys and the signature stops matching.
+ *   2. Claim the delivery by event id. The unique index on WebhookEvent.eventId is
+ *      the lock, so two instances handed the same retry in the same second process
+ *      it exactly once.
+ *   3. Dispatch.
+ *   4. Answer. 2xx means "we have it, stop retrying", and everything Razorpay could
+ *      usefully retry — and only that — is answered 500.
+ *
+ * The status codes are deliberate. An invalid signature is 400 and is never
+ * retried; an event we do not act on is still 200, because asking Razorpay to
+ * redeliver something we will ignore again just burns its retry budget; a handler
+ * that threw is 500, so the delivery comes back and the ledger row it left behind
+ * is re-run rather than skipped as a duplicate.
  */
 exports.webhook = asyncHandler(async (req, res) => {
   const signature = req.headers['x-razorpay-signature'];
-  const rawBody = req.rawBody || req.body;
+  const rawBody = Buffer.isBuffer(req.body) ? req.body : req.rawBody;
 
-  if (!razorpay.verifyWebhookSignature(rawBody, signature)) {
+  if (!env.razorpay.webhookSecret) {
+    // Answering 200 here would let a misconfigured deployment look healthy in the
+    // dashboard while silently dropping every payment update.
+    logger.error('Razorpay webhook received but RAZORPAY_WEBHOOK_SECRET is not set');
+    return res.status(503).json({ success: false, message: 'Webhook not configured' });
+  }
+
+  if (!rawBody || !razorpay.verifyWebhookSignature(rawBody, signature)) {
     logger.warn('Rejected Razorpay webhook with an invalid signature');
     return res.status(400).json({ success: false, message: 'Invalid signature' });
   }
 
-  const event = JSON.parse(rawBody.toString());
-  const entity = event.payload?.payment?.entity;
-
-  if (event.event === 'payment.captured' && entity) {
-    const payment = await Payment.findOne({ razorpayOrderId: entity.order_id });
-    if (payment && payment.status !== 'captured') {
-      payment.status = 'captured';
-      payment.razorpayPaymentId = entity.id;
-      payment.method = entity.method;
-      await payment.save();
-
-      /**
-       * Idempotent: the verify endpoint may already have promoted this order.
-       *
-       * A cancelled order is explicitly not promoted. Cancelling already put the
-       * stock back and handed the coupon redemption back, so forcing it to
-       * `confirmed` here revived an order nothing was reserved for — and money
-       * that lands on a cancelled order is a refund to raise, not a sale to
-       * resurrect. It is left cancelled, marked `refund_pending`, and the
-       * mismatch is logged for staff to settle through the gateway.
-       *
-       * `orderStatus` is set through a pipeline so only an order still waiting on
-       * payment moves to `confirmed`; one staff have already packed or shipped
-       * keeps the status it has.
-       */
-      const settled = ['cancelled', 'returned'].includes(
-        (await Order.findById(payment.order).select('orderStatus').lean())?.orderStatus
-      );
-
-      if (settled) {
-        await Order.updateOne(
-          { _id: payment.order, paymentStatus: { $ne: 'refunded' } },
-          { paymentStatus: 'refund_pending' }
-        );
-        logger.warn(
-          `Razorpay captured ${entity.id} for order ${payment.order}, which is already ` +
-            `cancelled or returned — flagged for refund rather than confirmed.`
-        );
-      }
-
-      const promoted = settled
-        ? { modifiedCount: 0 }
-        : await Order.updateOne({ _id: payment.order, paymentStatus: { $ne: 'paid' } }, [
-            {
-              $set: {
-                paymentStatus: 'paid',
-                orderStatus: {
-                  $cond: [{ $eq: ['$orderStatus', 'pending'] }, 'confirmed', '$orderStatus'],
-                },
-              },
-            },
-          ]);
-
-      // The webhook is the safety net for a shopper who closed the tab before
-      // /payments/verify ran, so it redeems too. redeemForOrder is idempotent per
-      // order, so whichever of the two arrives second consumes nothing. A
-      // cancelled order is skipped: cancelling gave the redemption back, and
-      // claiming it again here would spend a use on an order nobody is getting.
-      const order = await Order.findById(payment.order);
-      if (order && !settled) await redeemForOrder(order);
-
-      // Only announce when this webhook is the one that moved the order — otherwise
-      // /payments/verify already told everyone.
-      if (promoted.modifiedCount > 0 && order) {
-        broadcast.paymentUpdated(order, payment);
-        broadcast.orderStatusChanged(order, 'Payment confirmed by provider');
-      } else if (settled && order) {
-        // Staff need to see the money that landed on a cancelled order.
-        broadcast.paymentUpdated(order, payment);
-      }
-    }
+  let event;
+  try {
+    event = JSON.parse(rawBody.toString('utf8'));
+  } catch {
+    logger.warn('Rejected Razorpay webhook with an unparseable body');
+    return res.status(400).json({ success: false, message: 'Malformed payload' });
   }
 
-  if (event.event === 'payment.failed' && entity) {
-    await Payment.updateOne(
-      { razorpayOrderId: entity.order_id },
-      { status: 'failed', errorCode: entity.error_code, errorDescription: entity.error_description }
+  /**
+   * Razorpay's own id for this delivery, stable across its retries. The digest
+   * fallback covers hand-rolled test calls that omit the header — it dedupes
+   * byte-identical replays, which is the most a body alone can tell us.
+   */
+  const eventId =
+    req.headers['x-razorpay-event-id'] ||
+    crypto.createHash('sha256').update(rawBody).digest('hex');
+
+  const ledger = {
+    eventId,
+    event: event.event,
+    accountId: event.account_id,
+    occurredAt: event.created_at ? new Date(event.created_at * 1000) : new Date(),
+    payload: event,
+  };
+
+  /**
+   * Claim the delivery. `create` races with every other instance and only one wins;
+   * the loser gets E11000 and looks at what the winner recorded.
+   */
+  let record;
+  try {
+    record = await WebhookEvent.create(ledger);
+  } catch (err) {
+    if (err?.code !== 11000) throw err;
+
+    const seen = await WebhookEvent.findOneAndUpdate(
+      { eventId },
+      { $inc: { attempts: 1 } },
+      { new: true }
     );
 
-    const failed = await Payment.findOne({ razorpayOrderId: entity.order_id });
-    if (failed) broadcast.paymentUpdated(await Order.findById(failed.order), failed);
+    /**
+     * A previous attempt that *failed* is not a duplicate to skip — it is the
+     * retry we asked for. Anything else has already been applied and re-running
+     * it would, at best, resend a receipt.
+     */
+    if (seen && seen.status !== 'failed') {
+      logger.debug(`Razorpay webhook ${eventId} (${event.event}) already handled — acknowledging`);
+      return res.json({ success: true, duplicate: true });
+    }
+    record = seen;
   }
 
-  return res.json({ success: true });
+  try {
+    const outcome = await razorpayWebhook.handleEvent(event);
+
+    await WebhookEvent.updateOne(
+      { _id: record._id },
+      {
+        status: outcome.status,
+        note: outcome.note,
+        order: outcome.order,
+        payment: outcome.payment,
+        razorpayOrderId: outcome.razorpayOrderId,
+        razorpayPaymentId: outcome.razorpayPaymentId,
+        processedAt: new Date(),
+        $unset: { error: 1 },
+      }
+    );
+
+    logger.info(`Razorpay webhook ${event.event}: ${outcome.status} — ${outcome.note}`);
+    return res.json({ success: true });
+  } catch (err) {
+    await WebhookEvent.updateOne(
+      { _id: record._id },
+      { status: 'failed', error: err.message, processedAt: new Date() }
+    );
+    logger.error(`Razorpay webhook ${event.event} failed: ${err.stack || err.message}`);
+    // 500 on purpose: Razorpay retries, and the ledger row above lets the retry
+    // through rather than dismissing it as a duplicate.
+    return res.status(500).json({ success: false, message: 'Webhook processing failed' });
+  }
+});
+
+/**
+ * GET /payments/webhook-events (admin) — the delivery ledger.
+ *
+ * The screen support reaches for when a shopper says the money left their account
+ * and the order still reads pending: it answers whether the event ever arrived
+ * before anyone has to log into the gateway.
+ */
+exports.listWebhookEvents = asyncHandler(async (req, res) => {
+  const page = Number(req.query.page) || 1;
+  const limit = Math.min(Number(req.query.limit) || 20, 100);
+
+  const filter = {};
+  if (req.query.status) filter.status = req.query.status;
+  if (req.query.event) filter.event = req.query.event;
+  if (req.query.search?.trim()) {
+    const term = req.query.search.trim();
+    filter.$or = [
+      { razorpayOrderId: term },
+      { razorpayPaymentId: term },
+      { eventId: term },
+    ];
+  }
+
+  const [events, total] = await Promise.all([
+    WebhookEvent.find(filter)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .populate('order', 'orderNumber orderStatus paymentStatus')
+      .lean(),
+    WebhookEvent.countDocuments(filter),
+  ]);
+
+  return sendSuccess(res, {
+    message: 'Webhook events fetched',
+    data: { events },
+    meta: paginationMeta({ total, page, limit }),
+  });
+});
+
+/**
+ * POST /payments/webhook-events/:id/replay (admin) — re-run a stored event.
+ *
+ * The manual half of the retry story. Razorpay gives up after its own retry window,
+ * so an event that failed through a long outage can only be re-applied from the
+ * copy kept here. Safe to press twice: it re-runs the same handlers, which are the
+ * same ones a genuine redelivery would run, and they all converge rather than
+ * accumulate.
+ */
+exports.replayWebhookEvent = asyncHandler(async (req, res) => {
+  const record = await WebhookEvent.findById(req.params.id).select('+payload');
+  if (!record) throw ApiError.notFound('Webhook event not found');
+
+  const outcome = await razorpayWebhook.handleEvent(record.payload);
+
+  record.status = outcome.status;
+  record.note = `${outcome.note} (replayed by admin)`;
+  record.order = outcome.order || record.order;
+  record.payment = outcome.payment || record.payment;
+  record.processedAt = new Date();
+  record.error = undefined;
+  await record.save();
+
+  logger.info(`Admin replayed webhook ${record.eventId} (${record.event}): ${outcome.note}`);
+
+  return sendSuccess(res, { message: 'Webhook event replayed', data: { event: record } });
 });
 
 /** POST /payments/:id/refund (admin) */
 exports.refund = asyncHandler(async (req, res) => {
   const payment = await Payment.findById(req.params.id);
   if (!payment) throw ApiError.notFound('Payment not found');
-  if (payment.status !== 'captured') throw ApiError.badRequest('Only captured payments can be refunded');
+  if (!['captured', 'partially_refunded'].includes(payment.status)) {
+    throw ApiError.badRequest('Only captured payments can be refunded');
+  }
 
   /**
-   * A partial refund may never exceed what was captured. The gateway would refuse
-   * it anyway, but refusing here means the ceiling is this system's own rule
+   * A refund may never exceed what is *left* of the capture. The gateway would
+   * refuse it anyway, but refusing here means the ceiling is this system's own rule
    * rather than a remote error message staff have to interpret — and a mistyped
-   * figure is caught before it reaches the money.
+   * figure is caught before it reaches the money. Counting what has already gone
+   * back is what makes the second partial refund on one payment safe.
    */
-  if (req.body.amount != null && req.body.amount > payment.amount) {
-    throw ApiError.badRequest(
-      `Refund cannot exceed the captured amount of ${payment.amount}`
-    );
+  const refundable = payment.amount - (payment.amountRefunded || 0);
+  if (req.body.amount != null && req.body.amount > refundable) {
+    throw ApiError.badRequest(`Refund cannot exceed the refundable amount of ${refundable}`);
   }
 
   const refund = await razorpay.refundPayment({
@@ -308,27 +423,60 @@ exports.refund = asyncHandler(async (req, res) => {
     notes: { reason: req.body.reason || 'Admin initiated refund' },
   });
 
-  payment.status = 'refunded';
+  /**
+   * Razorpay answers `processed` when the credit went out instantly and `pending`
+   * when it is still moving through the bank. Believe that answer rather than
+   * assuming success: the `refund.processed` / `refund.failed` webhooks are what
+   * settle a pending one, and writing "refunded" here would leave staff with no
+   * way to tell an actual credit from one that later bounced.
+   */
+  const processed = refund.status === 'processed';
+
+  if (!payment.refunds) payment.refunds = [];
+  payment.refunds.push({
+    refundId: refund.id,
+    amount: refund.amount / 100,
+    status: refund.status,
+    speed: refund.speed_processed || refund.speed_requested,
+    reason: req.body.reason || 'Admin initiated refund',
+    processedAt: processed ? new Date() : undefined,
+  });
+  payment.amountRefunded = payment.refunds
+    .filter((r) => r.status === 'processed')
+    .reduce((sum, r) => sum + (r.amount || 0), 0);
+
   payment.refund = {
     refundId: refund.id,
     amount: refund.amount / 100,
     status: refund.status,
-    processedAt: new Date(),
+    processedAt: processed ? new Date() : undefined,
   };
+  if (processed) {
+    payment.status = payment.amountRefunded >= payment.amount ? 'refunded' : 'partially_refunded';
+  }
   await payment.save();
+
+  const fullyRefunded = payment.status === 'refunded';
 
   const order = await Order.findById(payment.order);
   if (order) {
-    order.paymentStatus = 'refunded';
+    order.paymentStatus = fullyRefunded ? 'refunded' : 'refund_pending';
+    if (fullyRefunded) {
+      order.refundedAt = new Date();
+      order.refundReference = refund.id;
+    }
     await order.save();
-    // A refunded order is no longer a successful redemption.
-    await releaseForOrder(order);
 
-    // Refunding an order that never shipped should release its inventory.
-    if (['pending', 'confirmed', 'packed'].includes(order.orderStatus)) {
-      // Released against the exact SKU each line reserved.
-      await Promise.all(order.items.map((item) => releaseStock(item)));
-      broadcast.stockChanged(order.items, { reason: 'order_refunded' });
+    if (fullyRefunded) {
+      // A refunded order is no longer a successful redemption.
+      await releaseForOrder(order);
+
+      // Refunding an order that never shipped should release its inventory.
+      if (['pending', 'confirmed', 'packed'].includes(order.orderStatus)) {
+        // Released against the exact SKU each line reserved.
+        await Promise.all(order.items.map((item) => releaseStock(item)));
+        broadcast.stockChanged(order.items, { reason: 'order_refunded' });
+      }
     }
   }
 
