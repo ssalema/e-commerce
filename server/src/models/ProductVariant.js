@@ -115,6 +115,15 @@ const productVariantSchema = new mongoose.Schema(
 productVariantSchema.index({ product: 1, attributeKey: 1 }, { unique: true });
 productVariantSchema.index({ product: 1, isActive: 1, displayOrder: 1 });
 productVariantSchema.index({ product: 1, stock: 1 });
+/*
+ * SKU-level inventory health for the dashboard, which asks the question across the
+ * whole collection rather than within one product — so the indexes above, all led by
+ * `product`, cannot serve it. Same shape as the product-level pair: a bounded stock
+ * range plus the highest threshold in play, so the field-to-field comparison never
+ * has to walk every SKU in the shop.
+ */
+productVariantSchema.index({ isActive: 1, stock: 1 });
+productVariantSchema.index({ isActive: 1, lowStockThreshold: -1 });
 
 /* ---------------- Virtuals ---------------- */
 productVariantSchema.virtual('inStock').get(function inStock() {

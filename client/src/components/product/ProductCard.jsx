@@ -2,7 +2,7 @@ import { memo } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import useCartActions from '../../hooks/useCartActions';
-import { formatPrice, optimisedImage, primaryImageOf } from '../../utils/format';
+import { formatPrice, imageSrcSet, optimisedImage, primaryImageOf } from '../../utils/format';
 import { hasPriceRange } from '../../utils/variants';
 import Icon from '../common/Icon';
 import Rating from '../common/Rating';
@@ -39,6 +39,16 @@ function ProductCard({ product, className = '' }) {
           {image ? (
             <img
               src={optimisedImage(image, { width: 500 })}
+              /*
+               * The tile is a fraction of the viewport, and which fraction depends on
+               * the breakpoint: two across on a phone, three from `sm`, four from `lg`,
+               * five from `xl` (see PRODUCT_GRID_COLUMNS, which these mirror). Telling
+               * the browser that lets it pick a candidate for the space it is actually
+               * filling — a phone stops downloading a 500px image for a 180px tile, and
+               * a retina desktop stops upscaling one.
+               */
+              srcSet={imageSrcSet(image)}
+              sizes="(min-width: 1280px) 20vw, (min-width: 1024px) 25vw, (min-width: 640px) 33vw, 50vw"
               alt={product.name}
               loading="lazy"
               decoding="async"

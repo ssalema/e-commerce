@@ -1,6 +1,7 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import { authApi, userApi } from '../api/endpoints';
 import { setAccessToken, getAccessToken } from '../api/client';
+import { clearFetchCache } from '../hooks/useFetch';
 
 export const login = createAsyncThunk('auth/login', async (payload, { rejectWithValue }) => {
   try {
@@ -70,6 +71,9 @@ export const logout = createAsyncThunk('auth/logout', async () => {
     await authApi.logout();
   } finally {
     setAccessToken(null);
+    // Nothing this session cached outlives it — see the same call in App.jsx for the
+    // session that expires rather than being ended deliberately.
+    clearFetchCache();
   }
 });
 

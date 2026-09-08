@@ -6,6 +6,8 @@ const { Product, ProductVariant, Category, SubCategory, Brand, Review } = requir
 const { destroyAsset } = require('../config/cloudinary');
 const variantService = require('../services/variant.service');
 const recommendations = require('../services/recommendation.service');
+const catalogueCache = require('../services/catalogueCache');
+const viewCounter = require('../services/viewCounter');
 const broadcast = require('../realtime/broadcast');
 const { localizeAll, localizeProduct, localizeProducts } = require('../utils/localize');
 
@@ -100,6 +102,22 @@ async function resolveRefs(Model, raw) {
   return ids;
 }
 
+/**
+ * How deep paging may go.
+ *
+ * `skip` is not free: the server walks and discards every row it steps over, so the
+ * cost of a page grows with its number while what it returns stays the same size. At
+ * page 5 that is invisible; at `?page=200000` it is a full traversal of the catalogue
+ * on demand, from an unauthenticated GET, repeated as fast as anyone cares to ask.
+ *
+ * Nobody browses past a few pages, and the sort orders here (newest, cheapest, best
+ * rated) mean the tail is the part nobody wants — so a ceiling costs a real shopper
+ * nothing and takes the cheapest way of loading the database off the table. Requests
+ * beyond it are clamped rather than refused: the last reachable page is a more useful
+ * answer to a stale bookmark or a crawler than an error.
+ */
+const MAX_SKIP = 5000;
+
 const parsePaging = (query, defaultLimit = 12) => {
   const page = Math.max(1, Number(query.page) || 1);
   const limit = Math.min(60, Math.max(1, Number(query.limit) || defaultLimit));
@@ -109,7 +127,9 @@ const parsePaging = (query, defaultLimit = 12) => {
    * a multiple of any page size — expressing that as a page is not possible.
    */
   const offset = Number(query.offset);
-  const skip = Number.isFinite(offset) && offset >= 0 ? Math.floor(offset) : (page - 1) * limit;
+  const requested =
+    Number.isFinite(offset) && offset >= 0 ? Math.floor(offset) : (page - 1) * limit;
+  const skip = Math.min(requested, MAX_SKIP);
   return { page, limit, skip };
 };
 
@@ -131,6 +151,16 @@ exports.listProducts = asyncHandler(async (req, res) => {
 
   const sort = SORT_MAP[req.query.sort] || SORT_MAP.newest;
 
+  /*
+   * The count is the same number for every page of the same filter, and it is the
+   * expensive half of this pair: under a search it re-runs the regex over the whole
+   * collection to produce a total the shopper reads once. Paging through results
+   * recomputed it per page, and every visitor filtering the same category recomputed
+   * it again. Memoised per filter, it is computed once per window for all of them.
+   *
+   * Admins are not excluded: their filter differs (drafts and archived rows are in
+   * scope), so it keys to a different entry rather than sharing the shopper's.
+   */
   const [products, total] = await Promise.all([
     Product.find(filter)
       .select(isAdmin ? undefined : LIST_FIELDS)
@@ -140,7 +170,9 @@ exports.listProducts = asyncHandler(async (req, res) => {
       .skip(skip)
       .limit(limit)
       .lean({ virtuals: true }),
-    Product.countDocuments(filter),
+    catalogueCache.resolveCount(catalogueCache.cacheKey(filter), () =>
+      Product.countDocuments(filter)
+    ),
   ]);
 
   return sendSuccess(res, {
@@ -164,25 +196,37 @@ exports.getFilterMeta = asyncHandler(async (req, res) => {
     });
   }
 
-  const [agg] = await Product.aggregate([
-    { $match: filter },
-    {
-      $facet: {
-        price: [{ $group: { _id: null, min: { $min: '$finalPrice' }, max: { $max: '$finalPrice' } } }],
-        brands: [
-          { $match: { brand: { $ne: null } } },
-          { $group: { _id: '$brand', count: { $sum: 1 } } },
-          { $sort: { count: -1 } },
-          { $limit: 25 },
-        ],
-        subCategories: [
-          { $group: { _id: '$subCategory', count: { $sum: 1 } } },
-          { $sort: { count: -1 } },
-        ],
-        total: [{ $count: 'value' }],
+  /*
+   * The `$facet` below is the most expensive query the sidebar can ask for: past the
+   * opening `$match` no branch can use an index, so each of the four walks the matched
+   * set in full. It is also asked constantly — once per filter change, by every
+   * shopper browsing the same category, all producing the identical answer.
+   *
+   * Memoised on the filter, so the fan-out runs once per window instead of once per
+   * interaction. The lookups that follow it are keyed by its results and are cheap
+   * `$in` reads, so they stay outside the memo and always reflect current branding.
+   */
+  const [agg] = await catalogueCache.resolveFilterMeta(catalogueCache.cacheKey(filter), () =>
+    Product.aggregate([
+      { $match: filter },
+      {
+        $facet: {
+          price: [{ $group: { _id: null, min: { $min: '$finalPrice' }, max: { $max: '$finalPrice' } } }],
+          brands: [
+            { $match: { brand: { $ne: null } } },
+            { $group: { _id: '$brand', count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+            { $limit: 25 },
+          ],
+          subCategories: [
+            { $group: { _id: '$subCategory', count: { $sum: 1 } } },
+            { $sort: { count: -1 } },
+          ],
+          total: [{ $count: 'value' }],
+        },
       },
-    },
-  ]);
+    ])
+  );
 
   const subCatIds = agg.subCategories.map((s) => s._id).filter(Boolean);
   const subCatDocs = await SubCategory.find({ _id: { $in: subCatIds } })
@@ -234,23 +278,33 @@ exports.searchSuggestions = asyncHandler(async (req, res) => {
    * Matching stays on the English source: `name` and `translations.<lang>.name` are
    * both searched, so a Hindi shopper finds a product by typing either its English
    * model number or its translated name. The results are then shown translated.
+   *
+   * An unanchored case-insensitive regex cannot use an index, so each of these is a
+   * full pass over its collection — and this endpoint fires per keystroke, from every
+   * shopper, and the popular prefixes are the same handful of words all day. Memoised
+   * on the term and the language, which is what turns a scan per keypress into a scan
+   * per distinct term per window. The result is cached untranslated-but-localised
+   * (the language is part of the key), so nothing leaks between languages.
    */
-  const [products, categories] = await Promise.all([
-    Product.find({
-      status: 'published',
-      $or: [{ name: rx }, { brand: rx }, { tags: rx }, { [`translations.${req.language}.name`]: rx }],
-    })
-      .select('name slug finalPrice price discountPercent images ratings translations')
-      .limit(8)
-      .lean({ virtuals: true }),
-    Category.find({
-      isActive: true,
-      $or: [{ name: rx }, { [`translations.${req.language}.name`]: rx }],
-    })
-      .select('name slug translations')
-      .limit(4)
-      .lean(),
-  ]);
+  const cacheKey = `${req.language}|${q.toLowerCase()}`;
+  const [products, categories] = await catalogueCache.resolveSearch(cacheKey, () =>
+    Promise.all([
+      Product.find({
+        status: 'published',
+        $or: [{ name: rx }, { brand: rx }, { tags: rx }, { [`translations.${req.language}.name`]: rx }],
+      })
+        .select('name slug finalPrice price discountPercent images ratings translations')
+        .limit(8)
+        .lean({ virtuals: true }),
+      Category.find({
+        isActive: true,
+        $or: [{ name: rx }, { [`translations.${req.language}.name`]: rx }],
+      })
+        .select('name slug translations')
+        .limit(4)
+        .lean(),
+    ])
+  );
 
   return sendSuccess(res, {
     message: 'Suggestions fetched',
@@ -273,8 +327,10 @@ exports.getProduct = asyncHandler(async (req, res) => {
 
   if (!product) throw ApiError.notFound('Product not found');
 
-  // Fire-and-forget: a view counter must never delay or fail the response.
-  Product.updateOne({ _id: product._id }, { $inc: { viewCount: 1 } }).catch(() => {});
+  // Buffered in memory and flushed in bulk: this is the most-requested read in the
+  // shop, and a write per page view put the primary under load that scaled with
+  // traffic for a number nothing reads synchronously. See services/viewCounter.js.
+  viewCounter.record(product._id);
 
   // Every combination — including sold-out and inactive ones, which the selector shows
   // disabled rather than hiding — travels with the product so switching a variant needs

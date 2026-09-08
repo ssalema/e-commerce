@@ -4,6 +4,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { Toaster } from 'react-hot-toast';
 import { HelmetProvider } from 'react-helmet-async';
 import { router } from './routes';
+import { clearFetchCache } from './hooks/useFetch';
 import LanguageProvider from './i18n/LanguageProvider';
 import WelcomeLanguageDialog from './components/language/WelcomeLanguageDialog';
 import { loadSession, sessionExpired } from './store/authSlice';
@@ -41,6 +42,14 @@ export default function App() {
       dispatch(sessionExpired());
       dispatch(resetCart());
       dispatch(resetWishlist());
+      /*
+       * Anything this tab cached under the old session goes with it. The personalised
+       * home feed is the one that matters — its key names the signed-in state, so it
+       * would not be served to the anonymous visitor who follows, but a shared machine
+       * is not the place to leave the previous shopper's data sitting in memory
+       * waiting to be revalidated.
+       */
+      clearFetchCache();
     };
     window.addEventListener('auth:expired', onExpired);
     return () => window.removeEventListener('auth:expired', onExpired);

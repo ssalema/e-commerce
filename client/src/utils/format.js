@@ -106,5 +106,26 @@ export function optimisedImage(url, { width = 500, height, crop = 'fill' } = {})
   return url.replace('/upload/', `/upload/${parts}/`);
 }
 
+/**
+ * The same image at several widths, as a `srcset`, so the browser picks one that fits
+ * the space and the screen instead of being handed a single guess.
+ *
+ * A fixed width is wrong in both directions at once, and product grids are where it
+ * costs the most. A phone rendering a tile about 180px wide was downloading the 500px
+ * version — several times the pixels it can show, over the connection least able to
+ * afford them — while a desktop retina tile was being handed the same 500px file and
+ * upscaling it. Most of this shop's traffic is the first case.
+ *
+ * Pair it with a `sizes` attribute describing how wide the image actually renders;
+ * without one the browser assumes full viewport width and picks the largest candidate,
+ * which is worse than the fixed width this replaces.
+ */
+export function imageSrcSet(url, widths = [200, 300, 500, 800], options = {}) {
+  if (!url || !url.includes('/upload/')) return undefined;
+  return widths
+    .map((width) => `${optimisedImage(url, { ...options, width })} ${width}w`)
+    .join(', ');
+}
+
 export const primaryImageOf = (product) =>
   product?.images?.find((i) => i.isPrimary)?.url || product?.images?.[0]?.url || '';

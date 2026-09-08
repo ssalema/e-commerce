@@ -63,6 +63,44 @@ async function resolveReturnReason({ reasonId, reason } = {}) {
 }
 
 /**
+ * Moves an order's status on the row itself, and reports whether *this* request is
+ * the one that moved it.
+ *
+ * Every closing path here reads the order, checks its status in memory, and then
+ * releases stock — three steps with two round trips between them, and the status
+ * the check read is only a snapshot. Two requests arriving together (a double-tap
+ * on Cancel, a shopper cancelling while staff cancel the same order, a retried
+ * PATCH) both saw `confirmed`, both passed, and both restocked: one unit sold came
+ * back as two, and the inflated count then oversells.
+ *
+ * The conditional update is what makes the transition exactly-once — the row moves
+ * off `from` once, so only one caller sees `modifiedCount: 1` and only that caller
+ * goes on to restock. It is the same guard `releaseForOrder` already applies to the
+ * coupon slot, which is the half of the same race that was already covered.
+ *
+ * A same-status "transition" is deliberately not a claim: nothing moved, so
+ * re-submitting `cancelled` on a cancelled order restocks nothing.
+ */
+async function claimOrderStatus(orderId, from, to) {
+  if (from === to) return false;
+  const claimed = await Order.updateOne(
+    { _id: orderId, orderStatus: from },
+    { $set: { orderStatus: to } }
+  );
+  return claimed.modifiedCount === 1;
+}
+
+/** The same guard for the return ladder, whose `refund_started` step is what restocks. */
+async function claimReturnStatus(orderId, from, to) {
+  if (from === to) return false;
+  const claimed = await Order.updateOne(
+    { _id: orderId, 'returnRequest.status': from },
+    { $set: { 'returnRequest.status': to } }
+  );
+  return claimed.modifiedCount === 1;
+}
+
+/**
  * The sentence a shopper is shown when their return is refused, in the words that
  * answer the question they actually asked ("why can't I return this?").
  *
@@ -494,6 +532,12 @@ exports.cancelOrder = asyncHandler(async (req, res) => {
   // email quotes back and what staff read on the order.
   const reason = await resolveCancellationReason(req.body);
 
+  // Everything above read a snapshot; this is where the order is actually closed.
+  // Whoever loses the claim did not cancel anything, so it must not restock.
+  if (!(await claimOrderStatus(order._id, order.orderStatus, 'cancelled'))) {
+    throw ApiError.conflict('This order has already been cancelled');
+  }
+
   // Cancelling returns the reserved units to the exact SKU they were taken from,
   // and hands back the coupon redemption the order was holding — a cancelled order
   // must not spend one of the shopper's uses, nor one of the store's.
@@ -620,6 +664,18 @@ exports.updateReturnStatus = asyncHandler(async (req, res) => {
         /_/g,
         ' '
       )}". Allowed: ${RETURN_FLOW[current]?.map((s) => s.replace(/_/g, ' ')).join(', ') || 'none'}`
+    );
+  }
+
+  /*
+   * `refund_started` is the step that puts the goods back into stock, so the move
+   * onto it has to be exactly-once for the same reason a cancellation does: two
+   * admins closing one return together would otherwise each restock the parcel.
+   * Claimed on the row before anything is given back.
+   */
+  if (!(await claimReturnStatus(order._id, current, status))) {
+    throw ApiError.conflict(
+      'This return was moved by someone else while this dialog was open. Reload to see where it stands.'
     );
   }
 
@@ -827,6 +883,21 @@ exports.updateOrderStatus = asyncHandler(async (req, res) => {
   // ladder does its own restocking at `refund_started`.
   let historyNote = note;
   if (status === 'cancelled') {
+    // Resolved before anything is claimed or given back: a reason that has since
+    // been deactivated is a refused request, not a half-cancelled order.
+    const cancellationReason = reasonId
+      ? await resolveCancellationReason({ reasonId })
+      : note || 'Cancelled by admin';
+
+    // The same claim the storefront cancellation makes, for the same reason: this
+    // dialog and that one can land on one order at the same moment, and only the
+    // request that actually closed the order may put its units back.
+    if (!(await claimOrderStatus(order._id, order.orderStatus, 'cancelled'))) {
+      throw ApiError.conflict(
+        'This order was cancelled by someone else while this dialog was open. Reload to see where it stands.'
+      );
+    }
+
     // Released against the exact SKU each line reserved — a cancelled Black/M
     // must never make Blue/L look available.
     await Promise.all(order.items.map((item) => releaseStock(item)));
@@ -835,9 +906,7 @@ exports.updateOrderStatus = asyncHandler(async (req, res) => {
     // Queued for a refund, not refunded — see cancelOrder above.
     if (order.paymentStatus === 'paid') order.paymentStatus = 'refund_pending';
     order.cancelledAt = new Date();
-    order.cancellationReason = reasonId
-      ? await resolveCancellationReason({ reasonId })
-      : note || 'Cancelled by admin';
+    order.cancellationReason = cancellationReason;
     order.cancelledBy = 'admin';
     order.cancelledByUser = req.user._id;
     historyNote = order.cancellationReason;

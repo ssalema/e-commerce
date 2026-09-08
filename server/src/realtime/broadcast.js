@@ -1,6 +1,7 @@
 const rt = require('./index');
 const EVENTS = require('./events');
 const logger = require('../utils/logger');
+const catalogueCache = require('../services/catalogueCache');
 
 /**
  * Domain-level realtime notifications.
@@ -88,8 +89,23 @@ exports.stockChanged = safe(async (items, { reason } = {}) => {
     });
   }
 
+  /*
+   * When these figures were read, so a client can tell a late event from a current
+   * one. The payload carries absolute stock rather than a delta, which makes it
+   * idempotent but not ordered: two sales of the same product a moment apart send
+   * two absolute counts, and a listener that applies them in the wrong order — a
+   * reconnect replay, a second emitter, a slow room — ends up showing the earlier,
+   * higher number and holds it until something else corrects it.
+   *
+   * Stamped once per broadcast rather than per product, since one read produced
+   * all of them. See client/src/utils/stockPatch.js, which drops anything older
+   * than what it has already applied for that product.
+   */
+  const at = Date.now();
+
   for (const product of products) {
     const payload = {
+      at,
       productId: String(product._id),
       slug: product.slug,
       name: product.name,
@@ -114,6 +130,9 @@ exports.stockChanged = safe(async (items, { reason } = {}) => {
  */
 exports.variantsChanged = safe((action, product) => {
   if (!product) return;
+  // A regenerated SKU set moves the price range and the in-stock count that the
+  // sidebar facets and the listing counts are computed from.
+  catalogueCache.clearAll();
   const payload = {
     action,
     productId: String(product._id),
@@ -137,12 +156,20 @@ const productPayload = (product) => ({
   discountPercent: product.discountPercent,
 });
 
+/*
+ * These three are the invalidation the catalogue memo relies on: a product added,
+ * edited or withdrawn can change any facet range, any listing count and any search
+ * suggestion, and narrowing that down is not worth the bookkeeping for an action an
+ * admin performs a few times a day.
+ */
 exports.productCreated = safe((product) => {
+  catalogueCache.clearAll();
   rt.toPublic(EVENTS.PRODUCT_CREATED, productPayload(product));
   rt.invalidateDashboard('product');
 });
 
 exports.productUpdated = safe((product) => {
+  catalogueCache.clearAll();
   const payload = productPayload(product);
   rt.toPublic(EVENTS.PRODUCT_UPDATED, payload);
   rt.toProduct(product._id, EVENTS.PRODUCT_UPDATED, payload);
@@ -150,6 +177,7 @@ exports.productUpdated = safe((product) => {
 });
 
 exports.productDeleted = safe((product) => {
+  catalogueCache.clearAll();
   const payload = { productId: String(product._id), slug: product.slug, name: product.name };
   rt.toPublic(EVENTS.PRODUCT_DELETED, payload);
   rt.toProduct(product._id, EVENTS.PRODUCT_DELETED, payload);

@@ -1,10 +1,11 @@
 import { useCallback, useEffect } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useTranslation } from 'react-i18next';
-import { fetchWishlist } from '../store/wishlistSlice';
-import { useLiveRefetch } from '../realtime/useRealtime';
-import { CATALOG_EVENTS } from '../realtime/events';
+import { fetchWishlist, productStockChanged } from '../store/wishlistSlice';
+import { useLiveRefetch, useRealtimeEvent } from '../realtime/useRealtime';
+import { CATALOG_STRUCTURE_EVENTS, EVENTS } from '../realtime/events';
 import { PRODUCT_GRID_COLUMNS } from '../utils/constants';
+import { isCurrentStockEvent } from '../utils/stockPatch';
 import Seo from '../components/common/Seo';
 import Breadcrumb from '../components/common/Breadcrumb';
 import ProductGrid from '../components/product/ProductGrid';
@@ -19,11 +20,28 @@ export default function Wishlist() {
     dispatch(fetchWishlist());
   }, [dispatch]);
 
-  // The list itself arrives over the socket, but the saved products' price and stock
-  // are catalogue state — those need a re-read.
+  // The list itself arrives over the socket, but a saved product's price and copy are
+  // catalogue state — an admin editing one needs a re-read here.
   useLiveRefetch(
     useCallback(() => dispatch(fetchWishlist()), [dispatch]),
-    CATALOG_EVENTS
+    CATALOG_STRUCTURE_EVENTS
+  );
+
+  // Stock is the exception: it moves on every order in the shop, and re-reading the
+  // whole wishlist because a stranger bought something unrelated is a request nobody
+  // needed. The broadcast carries the new absolute value, so the row is corrected.
+  //
+  // Absolute values are only safe in the order they were read, so an event older than
+  // one already applied for that product is dropped rather than dispatched — the same
+  // guard the grid reducers apply, checked here because a reducer must stay pure.
+  useRealtimeEvent(
+    EVENTS.PRODUCT_STOCK_CHANGED,
+    useCallback(
+      (payload) => {
+        if (isCurrentStockEvent(payload)) dispatch(productStockChanged(payload));
+      },
+      [dispatch]
+    )
   );
 
   // A saved item keeps the option the shopper had chosen, so the tile shows that SKU's

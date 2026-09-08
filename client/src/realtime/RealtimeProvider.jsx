@@ -7,6 +7,8 @@ import { fetchCart, cartReceived, resetCart } from '../store/cartSlice';
 import { fetchWishlist, fetchWishlistIds, wishlistReceived } from '../store/wishlistSlice';
 import { refreshCategories } from '../store/catalogSlice';
 import { setUser, sessionExpired } from '../store/authSlice';
+import { patchFetchCache } from '../hooks/useFetch';
+import { applyStockToAnyResponse } from '../utils/stockPatch';
 
 import { EVENTS } from './events';
 import { connectSocket, disconnectSocket, getSocket, getSocketId } from './socket';
@@ -194,6 +196,26 @@ export default function RealtimeProvider({ children }) {
   // in each one.
   useRealtimeEvent([EVENTS.CATEGORY_CHANGED, EVENTS.SUBCATEGORY_CHANGED], () =>
     dispatch(refreshCategories())
+  );
+
+  /*
+   * Stock corrections applied to every cached response, not just the screens that
+   * happen to be mounted.
+   *
+   * Each page patches its own data while it is on screen, but the cache outlives the
+   * page: a shopper on a product detail page has a home feed and a grid held from a
+   * moment ago, and the sales that happen while they are reading reach neither.
+   * Going back then paints those entries as they were and — being inside the
+   * staleness window — issues no request at all, so a sold-out card stays for the
+   * price of a navigation.
+   *
+   * This is the only subscriber that is always mounted, which makes it the one place
+   * the sweep can live. The reducer returns untouched objects for entries the event
+   * says nothing about, so a sale patches the few responses that show that product
+   * and leaves the rest alone.
+   */
+  useRealtimeEvent(EVENTS.PRODUCT_STOCK_CHANGED, (payload) =>
+    patchFetchCache((data) => applyStockToAnyResponse(data, payload))
   );
 
   const value = useMemo(() => ({ connected, ready }), [connected, ready]);

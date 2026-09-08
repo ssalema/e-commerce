@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useTranslation } from 'react-i18next';
 import { catalogApi, productApi } from '../api/endpoints';
+import { getAccessToken } from '../api/client';
 import useFetch from '../hooks/useFetch';
-import { useLiveRefetch } from '../realtime/useRealtime';
-import { CATALOG_EVENTS, EVENTS } from '../realtime/events';
+import { useLiveRefetch, useLiveStockPatch } from '../realtime/useRealtime';
+import { CATALOG_STRUCTURE_EVENTS, EVENTS } from '../realtime/events';
+import { applyStockToFeedResponse, applyStockToListResponse } from '../utils/stockPatch';
 import { fetchCategories, refreshCategories } from '../store/catalogSlice';
 import { getRecentlyViewed } from '../utils/recentlyViewed';
 import useSettings from '../settings/useSettings';
@@ -60,7 +62,15 @@ export default function Home() {
     dispatch(fetchCategories());
   }, [dispatch]);
 
-  const banners = useFetch(useCallback(() => catalogApi.banners('hero'), []), []);
+  /*
+   * `cacheKey` opts these three into the shared response cache in useFetch. The home
+   * page is where a shopper returns after every product they look at, and it was
+   * rebuilding itself from scratch each time. Now it paints from the last answer and
+   * revalidates behind the paint.
+   */
+  const banners = useFetch(useCallback(() => catalogApi.banners('hero'), []), [], {
+    cacheKey: 'banners:hero',
+  });
 
   // Recently viewed is resolved from localStorage ids, so it survives logout. Read
   // once into state so the list is a stable dependency rather than a new array on
@@ -74,32 +84,65 @@ export default function Home() {
    * signed-out visitor has. Signing in or out therefore has to re-ask — the rail it
    * returned a moment ago was built for somebody else.
    */
-  const isAuthenticated = useSelector((s) => s.auth.isAuthenticated);
   /*
-   * …which is also why it waits for `initialising` to clear. A signed-in visitor
-   * starts every load as anonymous for as long as /auth/me is in flight, so asking
-   * before then fetched a rail built for nobody and then immediately fetched it
-   * again under the real identity — two of the most expensive requests on the site,
-   * per page view, one of whose answers was thrown away. Restoring the session costs
-   * nothing to wait for when there is no token to restore: `loadSession` gives up in
-   * the same tick, so a signed-out visitor still asks on the first frame.
+   * Who is asking is read from the access token rather than from `auth.isAuthenticated`,
+   * and that distinction is the whole point.
+   *
+   * The rail used to wait for `/auth/me` to come back before it would ask for anything.
+   * The reasoning was sound as far as it went — a signed-in visitor's store says
+   * "anonymous" for as long as that call is in flight, so asking early fetched a rail
+   * built for nobody and then immediately fetched it again under the real identity.
+   * But waiting put the site's two slowest calls in a queue on the critical path of
+   * first paint, and the shopper watched an empty page for the length of both.
+   *
+   * Neither is necessary, because the store was never the right thing to read. The
+   * token is restored from localStorage synchronously at module load and the request
+   * interceptor attaches it, so a feed requested on the very first frame is *already*
+   * authenticated — the server builds the right shopper's rail whether or not
+   * `/auth/me` has answered yet. Reading the token directly gives a value that is
+   * correct from the first render and changes only on a real sign-in or sign-out, so
+   * the two requests now go out together and neither answer is thrown away.
    */
-  const sessionInitialising = useSelector((s) => s.auth.initialising);
+  // Subscribing to the store is what re-renders this component when a sign-in or a
+  // sign-out changes the token underneath it; the token is what is read, because it is
+  // correct a full round trip before the store is.
+  const isAuthenticated = useSelector((s) => s.auth.isAuthenticated);
+  const identity = getAccessToken() || isAuthenticated ? 'auth' : 'anon';
+
   const feed = useFetch(
     useCallback(() => productApi.homeFeed(recentIds), [recentIds]),
-    [recentIds, isAuthenticated],
-    { enabled: !sessionInitialising }
+    [recentIds, identity],
+    {
+      // Both halves of who is asking are in the key, so the rail a signed-in shopper
+      // was shown is never painted for the anonymous visitor who follows them.
+      cacheKey: ['home-feed', identity, recentIds.join(',')],
+    }
   );
 
-  // Every rail is derived from the catalogue, so any product change reshuffles them.
-  useLiveRefetch(feed.refetch, CATALOG_EVENTS);
+  /*
+   * Every rail is derived from the catalogue, so a product published, repriced or
+   * withdrawn genuinely reshuffles them and the feed has to be re-read. Those are
+   * admin edits, and they are rare enough to afford it.
+   *
+   * Stock is deliberately not among them. It moves on every order, it is broadcast to
+   * every visitor, and refetching this endpoint — the most expensive read the API
+   * serves — on each one meant a single checkout cost a full rebuild for every shopper
+   * browsing at that moment. The broadcast carries absolute stock, so the rails are
+   * corrected in place instead.
+   */
+  useLiveRefetch(feed.refetch, CATALOG_STRUCTURE_EVENTS);
+  useLiveStockPatch(feed.setData, applyStockToFeedResponse);
   useLiveRefetch(banners.refetch, EVENTS.BANNER_CHANGED);
 
   const recent = useFetch(
     useCallback(() => productApi.byIds(recentIds), [recentIds]),
     [recentIds],
-    { enabled: recentIds.length > 0 }
+    { enabled: recentIds.length > 0, cacheKey: ['by-ids', recentIds.join(',')] }
   );
+
+  // Same treatment for the recently-viewed strip: it renders the same cards, so it
+  // needs the same correction and has the same reason not to re-request the list.
+  useLiveStockPatch(recent.setData, applyStockToListResponse);
 
   const sections = feed.data?.data?.sections || [];
   const slides = banners.data?.data?.banners || [];
@@ -198,10 +241,9 @@ export default function Home() {
           message={feedError.message}
           onRetry={retryFailed}
         />
-      ) : /* `sessionInitialising` keeps the shimmer up over the gap before the fetch
-             is enabled — without it that gap renders as an empty page rather than a
-             loading one. */
-      (feed.loading || sessionInitialising) && !sections.length ? (
+      ) : /* No gap to cover any more: the feed is requested on the first frame rather
+             than after the session call, so its own loading flag is up from the start. */
+      feed.loading && !sections.length ? (
         <>
           <ProductSection title={t('home.forYou')} loading />
           <ProductSection title={t('home.topSelling')} loading />

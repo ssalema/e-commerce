@@ -8,10 +8,36 @@
     <link rel="preconnect" href="https://res.cloudinary.com" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!--
+      Inter, fetched without blocking the first paint.
+
+      As an ordinary stylesheet this was a render-blocking request to a third origin:
+      nothing at all could be painted until Google answered, on top of the DNS, TLS and
+      round trip that `preconnect` above only partly hides. On a slow mobile connection
+      that was dead time at the front of every cold visit.
+
+      `rel="preload" as="style"` fetches it at high priority without blocking anything,
+      and src/main.jsx flips this same tag to a real stylesheet on the first line it
+      runs — by which point the fetch has been in flight alongside the bundle and is
+      almost always already done. The swap lives there rather than in an `onload`
+      attribute here because production serves this page under a Content-Security-Policy
+      whose `script-src` is `'self'`: an inline handler would be blocked outright and
+      the font would simply never apply. `display=swap` in the URL means text paints in
+      the fallback face immediately either way. The `<noscript>` copy keeps the font for
+      readers without scripting, where blocking is the only option available.
+    -->
     <link
+      id="app-font"
+      rel="preload"
+      as="style"
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
-      rel="stylesheet"
     />
+    <noscript>
+      <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+        rel="stylesheet"
+      />
+    </noscript>
     <!--
       Everything between the seo markers is generated, never hand-edited:
         • at build time by client/plugins/seoHtml.js, from the admin's Organization

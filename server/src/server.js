@@ -7,6 +7,7 @@ const app = require('./app');
 const realtime = require('./realtime');
 const sessionService = require('./services/session.service');
 const commerceSettings = require('./services/commerce.service');
+const viewCounter = require('./services/viewCounter');
 
 let server;
 let sessionSweeper;
@@ -44,6 +45,9 @@ async function start() {
   server = http.createServer(app);
   realtime.init(server);
   startSessionSweeper();
+  // Product views accumulate in memory and are written in bulk rather than one $inc
+  // per page load; this is the timer that drains them.
+  viewCounter.start();
 
   server.listen(env.port, () => {
     console.log(`🚀 Server running on port ${env.port}`);
@@ -59,6 +63,8 @@ async function shutdown(signal, code = 0) {
   // Close sockets first so open connections don't hold the HTTP server open.
   await realtime.close();
   if (server) await new Promise((resolve) => server.close(resolve));
+  // Whatever views are still buffered go out while the connection is still open.
+  await viewCounter.stop();
   await disconnectDB();
   clearTimeout(force);
   process.exit(code);

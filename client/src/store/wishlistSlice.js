@@ -65,6 +65,24 @@ const wishlistSlice = createSlice({
       state.items = [];
       state.ids = [];
     },
+    /**
+     * A `product:stock-changed` broadcast, applied to the saved rows in place.
+     *
+     * The wishlist page used to re-read the whole list on this event. It is emitted
+     * per line item of every order placed, to every visitor, so anyone sitting on the
+     * page issued a request for somebody else's purchase — of a product they very
+     * likely do not even have saved. The payload carries absolute stock, so the row
+     * can simply be corrected.
+     */
+    productStockChanged: (state, action) => {
+      const { productId, stock } = action.payload || {};
+      if (!productId) return;
+      state.items.forEach((item) => {
+        if (item.product && String(item.product._id) === String(productId)) {
+          item.product.stock = stock;
+        }
+      });
+    },
     /** A wishlist pushed over the socket after another tab or device changed it. */
     wishlistReceived: (state, action) => {
       const wishlist = action.payload;
@@ -103,5 +121,5 @@ const wishlistSlice = createSlice({
   },
 });
 
-export const { resetWishlist, wishlistReceived } = wishlistSlice.actions;
+export const { resetWishlist, wishlistReceived, productStockChanged } = wishlistSlice.actions;
 export default wishlistSlice.reducer;

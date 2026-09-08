@@ -5,8 +5,9 @@ import { useTranslation } from 'react-i18next';
 import { productApi } from '../api/endpoints';
 import useFetch from '../hooks/useFetch';
 import useMediaQuery from '../hooks/useMediaQuery';
-import { useLiveRefetch } from '../realtime/useRealtime';
-import { CATALOG_EVENTS } from '../realtime/events';
+import { useLiveRefetch, useLiveStockPatch } from '../realtime/useRealtime';
+import { CATALOG_STRUCTURE_EVENTS } from '../realtime/events';
+import { applyStockToListResponse } from '../utils/stockPatch';
 import { PRODUCT_GRID_COLUMNS, SORT_OPTIONS } from '../utils/constants';
 import Seo from '../components/common/Seo';
 import Icon from '../components/common/Icon';
@@ -48,19 +49,38 @@ export default function ProductList() {
 
   const queryParams = useMemo(() => ({ ...filters, page, sort, limit: 12 }), [filters, page, sort]);
 
-  const { data, loading, error, refetch } = useFetch(
+  /*
+   * Both are keyed into the shared response cache. Paging forward and back, and
+   * returning to the grid from a product, are the two things shoppers do most on this
+   * screen, and both were full round trips for a list the tab had just been given.
+   * The sidebar's facets change far less often than the page number, so they are keyed
+   * on the filters alone and survive paging untouched.
+   */
+  const { data, loading, error, refetch, setData } = useFetch(
     useCallback(() => productApi.list(queryParams), [queryParams]),
-    [queryParams]
+    [queryParams],
+    { cacheKey: ['products', JSON.stringify(queryParams)] }
   );
 
   const metaQuery = useFetch(
     useCallback(() => productApi.filterMeta(filters), [filters]),
-    [filters]
+    [filters],
+    { cacheKey: ['filter-meta', JSON.stringify(filters)] }
   );
 
-  // The grid and the sidebar counts are both derived from the same catalogue.
-  useLiveRefetch(refetch, CATALOG_EVENTS);
-  useLiveRefetch(metaQuery.refetch, CATALOG_EVENTS);
+  /*
+   * The grid and the sidebar counts are both derived from the same catalogue, so a
+   * product added, repriced or withdrawn re-reads both.
+   *
+   * A stock change re-reads neither. It arrives on every order placed, to every
+   * visitor, and these two requests — a filtered listing and a `$facet` over the whole
+   * matching set — are among the more expensive the API answers. The grid patches the
+   * affected card from the payload instead; the sidebar's counts are per brand and
+   * sub-category and do not move with stock at all.
+   */
+  useLiveRefetch(refetch, CATALOG_STRUCTURE_EVENTS);
+  useLiveRefetch(metaQuery.refetch, CATALOG_STRUCTURE_EVENTS);
+  useLiveStockPatch(setData, applyStockToListResponse);
 
   const products = data?.data?.products || [];
   const meta = data?.meta;

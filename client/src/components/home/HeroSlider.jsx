@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { optimisedImage } from '../../utils/format';
+import { imageSrcSet, optimisedImage } from '../../utils/format';
 import Icon from '../common/Icon';
 import { Skeleton } from '../common/Skeleton';
 
@@ -79,6 +79,15 @@ export default function HeroSlider({ slides = [], loading = false }) {
                 )}
                 <img
                   src={optimisedImage(slide.image.url, { width: 1600, height: 600 })}
+                  /*
+                   * The banner spans the full width of the page, so the right file
+                   * depends entirely on the screen: a 1366px laptop was downloading the
+                   * 1600px render and a 2560px display was stretching it. The mobile
+                   * art above still wins under 640px — this only offers choices for the
+                   * desktop image.
+                   */
+                  srcSet={imageSrcSet(slide.image.url, [800, 1200, 1600, 2000], { crop: 'limit' })}
+                  sizes="100vw"
                   alt={slide.title}
                   // The first slide is the LCP element — it must not be lazy.
                   loading={i === 0 ? 'eager' : 'lazy'}

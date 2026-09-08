@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { optimisedImage } from '../../utils/format';
+import { imageSrcSet, optimisedImage } from '../../utils/format';
 import useMediaQuery from '../../hooks/useMediaQuery';
 import Icon from '../common/Icon';
 import ImageViewer from '../common/ImageViewer';
@@ -146,9 +146,22 @@ export default function ImageGallery({ images = [], videos = [], alt = '' }) {
               <>
                 <img
                   src={optimisedImage(current.url, { width: 900 })}
+                  /*
+                   * The hero renders roughly half the viewport on desktop and all of it
+                   * on a phone, so a single 900px file is far more than a phone needs
+                   * and slightly less than a wide retina screen wants.
+                   */
+                  srcSet={imageSrcSet(current.url, [400, 600, 900, 1200], { crop: 'limit' })}
+                  sizes="(min-width: 1024px) 45vw, 100vw"
                   alt={current.alt || alt}
-                  // The gallery hero is above the fold on the details page.
+                  // The gallery hero is above the fold on the details page, and it is
+                  // what the page is measured on — so it is fetched ahead of the rest
+                  // rather than merely not deferred.
                   loading="eager"
+                  // Lowercase on purpose: react-dom 18 has no mapping for the camelCase
+                  // spelling and would drop the hint. Same reasoning as HeroSlider.
+                  // eslint-disable-next-line react/no-unknown-property
+                  fetchpriority="high"
                   className="h-full w-full object-contain transition-transform duration-200"
                   style={
                     zooming

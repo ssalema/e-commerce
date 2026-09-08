@@ -34,11 +34,30 @@ function publicCache(seconds, swr = seconds * 10) {
 
     res.vary(VARY_ON);
 
-    if (req.user) {
-      // Admin previews and any personalised variant stay out of shared caches.
-      // `no-cache` still permits the browser to hold a copy and revalidate it,
-      // so the ETag round trip remains cheap.
+    /*
+     * An admin is the only identity that changes these bytes: the catalogue
+     * controllers hand `adminView` the untranslated source copy and draft rows,
+     * and a preview of an unpublished product must never outlive the request.
+     * `no-cache` still permits the browser to hold a copy and revalidate it, so
+     * the ETag round trip remains cheap.
+     */
+    if (req.user?.role === 'admin') {
       res.set('Cache-Control', 'private, no-cache');
+      return next();
+    }
+
+    /*
+     * A signed-in shopper receives byte-for-byte what an anonymous one does —
+     * nothing on these routes is personalised below the admin branch above — so
+     * the only thing their session costs them is the right to a *shared* cache.
+     * They keep the same freshness window in their own browser.
+     *
+     * This used to fall into the `no-cache` branch on the strength of `req.user`
+     * alone, which meant every logged-in visitor revalidated the whole catalogue
+     * on every navigation and every one of those revalidations reached Mongo.
+     */
+    if (req.user) {
+      res.set('Cache-Control', `private, max-age=${seconds}`);
       return next();
     }
 

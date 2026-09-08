@@ -29,6 +29,57 @@ exports.getStats = asyncHandler(async (_req, res) => {
   return sendSuccess(res, { message: 'Dashboard stats fetched', data });
 });
 
+/**
+ * Counts rows sitting at or below their own `lowStockThreshold`.
+ *
+ * The comparison is between two fields of the same document, which `$expr` can only
+ * answer by reading every document in the collection — and it was doing exactly that,
+ * twice, across Products and ProductVariants.
+ *
+ * The bound is what removes the scan. Whatever the highest threshold in the collection
+ * is, nothing holding more units than that can be low on stock, so a single indexed
+ * lookup for that maximum turns the question into a narrow range scan with the
+ * field-to-field test applied only to the handful of rows inside it. On a catalogue
+ * that leaves the threshold at its default of five, that is five stock values instead
+ * of the whole catalogue.
+ *
+ * The answer is exact, not an approximation: the bound cannot exclude a row that
+ * qualifies, because qualifying means `stock <= threshold <= max`.
+ *
+ * @param {import('mongoose').Model} Model
+ * @param {object}  [options]
+ * @param {object}  [options.scope]        conditions true of any candidate (e.g. active SKUs).
+ * @param {boolean} [options.excludeEmpty] whether a row at zero counts as low rather than
+ *                                         out. The product card reports the two separately
+ *                                         and excludes zero; the SKU card does not, and both
+ *                                         keep the number they have always shown.
+ */
+async function countLowStock(Model, { scope = {}, excludeEmpty = false } = {}) {
+  const [highest] = await Model.find(scope)
+    .select('lowStockThreshold')
+    .sort({ lowStockThreshold: -1 })
+    .limit(1)
+    .lean();
+
+  const ceiling = highest?.lowStockThreshold;
+
+  // Nothing in the collection at all.
+  if (!Number.isFinite(ceiling)) return 0;
+  /*
+   * Every threshold is zero — "never warn about this". Nothing can then be low *and*
+   * hold at least one unit, so the count is zero without asking. When empty rows do
+   * count, a ceiling of zero is still a real bound (it selects exactly the rows at
+   * zero) and the query below runs normally.
+   */
+  if (excludeEmpty && ceiling <= 0) return 0;
+
+  return Model.countDocuments({
+    ...scope,
+    stock: excludeEmpty ? { $gt: 0, $lte: ceiling } : { $lte: ceiling },
+    $expr: { $lte: ['$stock', '$lowStockThreshold'] },
+  });
+}
+
 /** The fan-out itself. Runs only on a cache miss. */
 async function computeStats() {
   const today = startOfDay(Date.now());
@@ -55,7 +106,7 @@ async function computeStats() {
     Product.countDocuments(),
     Product.countDocuments({ status: 'published' }),
     Product.countDocuments({ stock: { $lte: 0 } }),
-    Product.countDocuments({ $expr: { $and: [{ $gt: ['$stock', 0] }, { $lte: ['$stock', '$lowStockThreshold'] }] } }),
+    countLowStock(Product, { excludeEmpty: true }),
     User.countDocuments(CUSTOMER_MATCH),
     User.countDocuments({ ...CUSTOMER_MATCH, createdAt: { $gte: last30 } }),
     Order.countDocuments(),
@@ -68,10 +119,7 @@ async function computeStats() {
     // SKU-level inventory health: a product can look stocked and still be unbuyable in the
     // one size everybody wants.
     ProductVariant.countDocuments({ isActive: true }),
-    ProductVariant.countDocuments({
-      isActive: true,
-      $expr: { $lte: ['$stock', '$lowStockThreshold'] },
-    }),
+    countLowStock(ProductVariant, { scope: { isActive: true } }),
   ]);
 
   const revenue = revenueAgg[0]?.total || 0;

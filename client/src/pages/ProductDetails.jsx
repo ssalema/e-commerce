@@ -7,8 +7,9 @@ import useFetch from '../hooks/useFetch';
 import useCartActions from '../hooks/useCartActions';
 import useVariantSelection from '../hooks/useVariantSelection';
 import useSettings from '../settings/useSettings';
-import { useLiveRefetch, useRealtimeRoom } from '../realtime/useRealtime';
+import { useLiveRefetch, useLiveStockPatch, useRealtimeRoom } from '../realtime/useRealtime';
 import { CATALOG_EVENTS, REVIEW_EVENTS, rooms } from '../realtime/events';
+import { applyStockToList, applyStockToListResponse } from '../utils/stockPatch';
 import { pushRecentlyViewed, getRecentlyViewed } from '../utils/recentlyViewed';
 import { formatPrice, primaryImageOf } from '../utils/format';
 import { variantLabel } from '../utils/variants';
@@ -77,9 +78,16 @@ export default function ProductDetails() {
   const [quantity, setQuantity] = useState(1);
   const [recent, setRecent] = useState([]);
 
+  /*
+   * Cached, with a short window. A shopper comparing two products moves between them
+   * repeatedly, and the buy box is what they are comparing — so the page paints from
+   * the last answer instantly and the request that follows corrects the stock line a
+   * moment later, rather than showing a skeleton where the price should be.
+   */
   const { data, loading, error, refetch } = useFetch(
     useCallback(() => productApi.detail(slug), [slug]),
-    [slug]
+    [slug],
+    { cacheKey: ['product', slug], staleMs: 15000 }
   );
 
   const product = data?.data?.product;
@@ -104,7 +112,7 @@ export default function ProductDetails() {
   const related = useFetch(
     useCallback(() => productApi.related(product._id), [product?._id]),
     [product?._id],
-    { enabled: Boolean(product?._id) }
+    { enabled: Boolean(product?._id), cacheKey: ['related', product?._id] }
   );
 
   // Joining the product's room means stock, price and rating changes arrive here
@@ -117,6 +125,15 @@ export default function ProductDetails() {
     enabled: Boolean(product?._id),
     filter: (payload) => payload?.productId === product?._id,
   });
+
+  /*
+   * The two rails of cards below the buy box are a different matter. They show other
+   * products, so the filter above never fires for them, and a refetch on every stock
+   * event in the shop would be exactly the stampede this page's own listener avoids by
+   * being narrow. They are corrected from the payload instead.
+   */
+  useLiveStockPatch(related.setData, applyStockToListResponse);
+  useLiveStockPatch(setRecent, applyStockToList);
 
   // Record the visit, then resolve the *previously* viewed ids for the rail below.
   useEffect(() => {

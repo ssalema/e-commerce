@@ -3,12 +3,37 @@ const env = require('../config/env');
 
 const message = (msg) => ({ success: false, message: msg });
 
-/** Broad ceiling for the whole API. */
+/**
+ * Broad ceiling for the whole API — an abuse backstop, not a capacity control.
+ *
+ * The number has to be read against what a real visit costs. One cold home page is
+ * already six requests (session, settings, categories, banners, the feed, recently
+ * viewed) before the shopper has clicked anything, and a browse-and-buy session runs
+ * to several dozen. At 300 per fifteen minutes an ordinary afternoon of shopping
+ * approached the ceiling on its own.
+ *
+ * The bucket is also per IP, and an IP is not a person: mobile carriers, offices,
+ * schools and campus networks put hundreds of shoppers behind one address. Whoever
+ * arrived last is the one shown an error, having done nothing.
+ *
+ * Raised to a level a determined shopper cannot reach by shopping, while still
+ * refusing the volume a scraper needs to be worth running. GETs that the storefront
+ * caches — see middleware/cacheControl — are the bulk of the traffic and the cheapest
+ * to serve, so the tighter per-endpoint limiters below remain the real defence on
+ * everything that costs something: credentials, verification codes, uploads and the
+ * public forms.
+ */
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: env.isProd ? 300 : 5000,
+  max: env.isProd ? 1500 : 5000,
   standardHeaders: true,
   legacyHeaders: false,
+  /*
+   * A preflight is the browser asking permission, not the app asking for data, and
+   * spending a shopper's budget on it means a page can be refused for requests it
+   * never made.
+   */
+  skip: (req) => req.method === 'OPTIONS',
   message: message('Too many requests, please try again in a few minutes'),
 });
 

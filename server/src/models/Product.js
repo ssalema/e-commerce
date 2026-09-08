@@ -268,6 +268,20 @@ productSchema.index({ category: 1, subCategory: 1, status: 1 });
 productSchema.index({ status: 1, createdAt: -1 });
 productSchema.index({ status: 1, finalPrice: 1 });
 productSchema.index({ status: 1, 'ratings.average': -1 });
+/*
+ * Inventory health. The dashboard counts products that are out of stock, and products
+ * sitting at or below their own threshold — the second being a comparison between two
+ * fields, which `$expr` alone can only answer by reading every document in the
+ * collection.
+ *
+ * These two indexes are what let it be answered from a bounded range instead: the
+ * highest threshold any product carries is one lookup on the second index, and no
+ * product holding more units than that can possibly be low, so the comparison only
+ * ever runs over the narrow slice the first index returns. See
+ * controllers/dashboard.controller.js.
+ */
+productSchema.index({ stock: 1 });
+productSchema.index({ lowStockThreshold: -1 });
 
 /* ---------------- Virtuals ---------------- */
 productSchema.virtual('primaryImage').get(function primaryImage() {

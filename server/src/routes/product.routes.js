@@ -21,8 +21,10 @@ router.get('/', optionalAuth, pagination, validate, cache.catalogue, ctrl.listPr
 router.get('/filters', cache.catalogue, ctrl.getFilterMeta);
 router.get('/search', cache.search, ctrl.searchSuggestions);
 // optionalAuth: the "For You" rail is personalised from the signed-in shopper's cart,
-// wishlist and orders. cache.catalogue follows it, and drops an authenticated response
-// to `private, no-cache` so one shopper's rail is never served to another.
+// wishlist and orders. cache.catalogue follows it, and marks an authenticated response
+// `private` so one shopper's rail is never served to another — it is cacheable in that
+// shopper's own browser and nowhere else. `Vary: Authorization` is what keeps the
+// anonymous copy from being handed back on the first request after signing in.
 router.get('/home-feed', optionalAuth, cache.catalogue, ctrl.getHomeFeed);
 // The rest of one homepage rail. Same builder as the feed, same personalisation, so
 // "load more" continues the rail the shopper is looking at rather than an approximation

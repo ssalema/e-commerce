@@ -30,6 +30,19 @@ function createTtlCache({ ttlMs, max = 64 }) {
   const inFlight = new Map();
 
   /**
+   * Bumped by every `clear`. A load carries the epoch it started under, and a load
+   * that started under an older one is not allowed to seat its result.
+   *
+   * Without this, an invalidation only removes what has already landed: a query
+   * that was in flight when the admin saved still returns the pre-save answer, and
+   * `entries.set` then writes it back with a *fresh* timestamp. The edit is then
+   * invisible for a full TTL — and, because the write path has already emitted its
+   * one broadcast, nothing is coming to correct it. That is the whole window the
+   * comment above calls "correctness rests on the invalidation".
+   */
+  let epoch = 0;
+
+  /**
    * Returns the cached value for `key`, calling `loader()` on a miss.
    *
    * @param {string} key
@@ -45,8 +58,12 @@ function createTtlCache({ ttlMs, max = 64 }) {
     const pending = inFlight.get(key);
     if (pending) return pending;
 
+    const startedAt = epoch;
     const promise = (async () => {
       const value = await loader();
+      // Still the answer to the question that was asked, so it is returned to the
+      // callers waiting on it — it is only barred from being cached for others.
+      if (startedAt !== epoch) return value;
       // Plain FIFO eviction: this bounds memory, it is not a hit-rate strategy.
       if (entries.size >= max && !entries.has(key)) {
         entries.delete(entries.keys().next().value);
@@ -59,8 +76,15 @@ function createTtlCache({ ttlMs, max = 64 }) {
     return promise;
   }
 
-  /** Drops one key, or everything when called bare. Used by the write paths. */
+  /**
+   * Drops one key, or everything when called bare. Used by the write paths.
+   *
+   * Loads already in flight are invalidated too, whichever form is used: a clear
+   * cannot know which keys a pending query would have written, and one extra miss
+   * costs a query where getting it wrong costs a TTL of stale answers.
+   */
   function clear(key) {
+    epoch += 1;
     if (key === undefined) entries.clear();
     else entries.delete(key);
   }
