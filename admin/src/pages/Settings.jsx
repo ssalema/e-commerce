@@ -128,9 +128,9 @@ function SettingsSkeleton() {
   return (
     <Box sx={{ pb: 10 }}>
       <PageHeader
-        title="Organization"
+        title="Settings"
         subtitle={SETTINGS_SUBTITLE}
-        breadcrumbs={[{ label: 'Organization' }]}
+        breadcrumbs={[{ label: 'Settings' }]}
       />
 
       <Grid container spacing={2.5} alignItems="stretch">
@@ -292,7 +292,7 @@ export default function Settings() {
       // The whole document goes up; the API stamps only the leaves that actually changed.
       const res = await settingApi.update(values);
       adopt(res.data.settings);
-      enqueueSnackbar('Organization settings saved', { variant: 'success' });
+      enqueueSnackbar('Settings saved', { variant: 'success' });
     } catch (err) {
       const fieldErrors = {};
       (err.errors || []).forEach(({ field, message }) => {
@@ -316,9 +316,9 @@ export default function Settings() {
             the difference between a header that holds still and one that shrinks
             the moment a fetch fails. */}
         <PageHeader
-          title="Organization"
+          title="Settings"
           subtitle={SETTINGS_SUBTITLE}
-          breadcrumbs={[{ label: 'Organization' }]}
+          breadcrumbs={[{ label: 'Settings' }]}
         />
         <Card>
           <ErrorState
@@ -334,9 +334,9 @@ export default function Settings() {
   return (
     <Box sx={{ pb: 10 }}>
       <PageHeader
-        title="Organization"
+        title="Settings"
         subtitle={SETTINGS_SUBTITLE}
-        breadcrumbs={[{ label: 'Organization' }]}
+        breadcrumbs={[{ label: 'Settings' }]}
         action={
           isDirty ? <Chip label={`${dirtySections.length} section(s) edited`} color="warning" /> : null
         }

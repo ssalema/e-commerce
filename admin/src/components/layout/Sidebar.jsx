@@ -55,7 +55,7 @@ const NAV_GROUPS = [
   },
   {
     heading: 'System',
-    items: [{ to: '/settings', label: 'Organization', icon: <SettingsIcon /> }],
+    items: [{ to: '/settings', label: 'Settings', icon: <SettingsIcon /> }],
   },
 ];
 
