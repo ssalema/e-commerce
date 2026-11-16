@@ -3,45 +3,29 @@ const mongoose = require('mongoose');
 const env = require('../config/env');
 const { connectDB, disconnectDB } = require('../config/db');
 const {
-  User, Category, SubCategory, Brand, Product, Banner, Coupon, Cart, Wishlist, Review, Order, Payment, Address,
+  User, Category, SubCategory, Brand, Product, ProductVariant, Banner, Coupon, Cart, Wishlist, Review, Order, Payment,
 } = require('../models');
 const data = require('./data');
 
-const ADMIN = { name: 'Store Admin', email: 'admin@shop.com', password: 'Admin@123', role: 'admin' };
-const DEMO = { name: 'Demo Customer', email: 'customer@shop.com', password: 'Customer@123', role: 'user' };
-
+/**
+ * Clears catalogue and shopping data. User accounts (and their addresses) are left
+ * alone, so an admin made with `npm run admin:create` survives a reseed; carts and
+ * wishlists are recreated lazily on next use.
+ */
 async function destroy() {
   await Promise.all([
-    Product.deleteMany({}), Category.deleteMany({}), SubCategory.deleteMany({}), Brand.deleteMany({}),
+    Product.deleteMany({}), ProductVariant.deleteMany({}), Category.deleteMany({}), SubCategory.deleteMany({}), Brand.deleteMany({}),
     Banner.deleteMany({}), Coupon.deleteMany({}), Cart.deleteMany({}), Wishlist.deleteMany({}),
-    Review.deleteMany({}), Order.deleteMany({}), Payment.deleteMany({}), Address.deleteMany({}),
-    User.deleteMany({}),
+    Review.deleteMany({}), Order.deleteMany({}), Payment.deleteMany({}),
   ]);
-  console.log('✔ All collections cleared');
+  console.log('✔ Catalogue and shopping data cleared (users kept)');
 }
 
 async function seed() {
   await destroy();
 
-  /* Users — created via .create() so the password hashing hook runs. */
-  const admin = await User.create(ADMIN);
-  const customer = await User.create({ ...DEMO, phone: '9876543210' });
-  await Promise.all([
-    Cart.create({ user: customer._id }),
-    Wishlist.create({ user: customer._id }),
-    Address.create({
-      user: customer._id,
-      label: 'home',
-      fullName: 'Demo Customer',
-      phone: '9876543210',
-      addressLine1: '221B Nehru Road, Lakeview Apartments',
-      city: 'Pune',
-      state: 'Maharashtra',
-      pincode: '411001',
-      isDefault: true,
-    }),
-  ]);
-  console.log(`✔ Users seeded (admin: ${ADMIN.email} / ${ADMIN.password})`);
+  // The seed creates no users. Products are credited to an existing admin, if any.
+  const admin = await User.findOne({ role: 'admin' }).select('_id').lean();
 
   /* Taxonomy */
   const categoryByName = new Map();
@@ -82,7 +66,7 @@ async function seed() {
       category: category._id,
       subCategory: subCategory?._id,
       status: 'published',
-      createdBy: admin._id,
+      createdBy: admin?._id,
       sku: `SKU-${String(++productCount).padStart(5, '0')}`,
       images: item.images.map((img, i) => ({ ...img, isPrimary: i === 0, displayOrder: i })),
       meta: {
@@ -99,23 +83,6 @@ async function seed() {
 
   await Coupon.insertMany(data.coupons);
   console.log(`✔ ${data.coupons.length} coupons seeded`);
-
-  /* A few reviews so the ratings UI has real data to render. */
-  const someProducts = await Product.find().limit(5);
-  const samples = [
-    { rating: 5, title: 'Exactly as described', comment: 'Quality matched the spec sheet. Delivery was on time and the packaging was intact.' },
-    { rating: 4, title: 'Good value', comment: 'Works well for the price. Would have liked slightly faster delivery.' },
-    { rating: 5, title: 'Will order again', comment: 'Second time buying this. Consistent quality across both orders.' },
-  ];
-  for (const [i, product] of someProducts.entries()) {
-    await Review.create({
-      product: product._id,
-      user: customer._id,
-      ...samples[i % samples.length],
-      isVerifiedPurchase: true,
-    });
-  }
-  console.log(`✔ ${someProducts.length} reviews seeded`);
 }
 
 (async () => {
@@ -127,9 +94,7 @@ async function seed() {
       await destroy();
     } else {
       await seed();
-      console.log('\n🎉 Seeding complete.');
-      console.log(`   Admin    → ${ADMIN.email} / ${ADMIN.password}`);
-      console.log(`   Customer → ${DEMO.email} / ${DEMO.password}\n`);
+      console.log('\n🎉 Seeding complete. No users were created; run `npm run admin:create` for an admin account.\n');
     }
   } catch (err) {
     console.error(`✖ Seeding failed: ${err.message}`);

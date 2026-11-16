@@ -174,7 +174,7 @@ function BannerDialog({ initial, onClose, onSaved }) {
                 label="Button link"
                 value={values.ctaLink || ''}
                 onChange={set('ctaLink')}
-                helperText="e.g. /products?category=power-tools"
+                helperText="e.g. /products?category=electronics"
               />
             </Grid>
 

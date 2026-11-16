@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useSnackbar } from 'notistack';
 import Box from '@mui/material/Box';
 import Grid from '@mui/material/Grid2';
@@ -15,6 +16,9 @@ import Chip from '@mui/material/Chip';
 import Skeleton from '@mui/material/Skeleton';
 import CircularProgress from '@mui/material/CircularProgress';
 import InputAdornment from '@mui/material/InputAdornment';
+import Tabs from '@mui/material/Tabs';
+import Tab from '@mui/material/Tab';
+import Slide from '@mui/material/Slide';
 
 import SaveIcon from '@mui/icons-material/SaveOutlined';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
@@ -90,7 +94,20 @@ const SECTION_LABEL = {
   social: 'Social profiles',
 };
 
-/** Card shell shared by every section: title, per-section reset, consistent padding. */
+/**
+ * The page is split into tabs; each owns one or more sections of the single settings
+ * document. Form state stays in one place, so switching tabs never loses an edit and
+ * one Save sends everything. The tab lives in the URL, as on Reasons and Inquiries.
+ */
+const TABS = [
+  { value: 'general', label: 'General & Branding', sections: ['general', 'branding'] },
+  { value: 'seo', label: 'SEO Settings', sections: ['seo'] },
+  { value: 'commerce', label: 'Commerce Rules', sections: ['commerce'] },
+  { value: 'social', label: 'Social Profiles', sections: ['social'] },
+];
+const TAB_VALUES = TABS.map((t) => t.value);
+const tabOfSection = (section) => TABS.find((t) => t.sections.includes(section))?.value;
+
 /** A section card's outline: its heading, the divider, and `fields` inputs under it. */
 function SectionSkeleton({ fields, columns = 1 }) {
   return (
@@ -133,21 +150,20 @@ function SettingsSkeleton() {
         breadcrumbs={[{ label: 'Settings' }]}
       />
 
+      <Card sx={{ mb: 2.5, px: 2, py: 1.25 }}>
+        <Stack direction="row" spacing={4}>
+          {TABS.map((t) => (
+            <Skeleton key={t.value} variant="text" width={130} height={32} />
+          ))}
+        </Stack>
+      </Card>
+
       <Grid container spacing={2.5} alignItems="stretch">
-        <Grid size={{ xs: 12, lg: 5 }}>
+        <Grid size={{ xs: 12, lg: 8 }}>
           <SectionSkeleton fields={5} />
         </Grid>
         <Grid size={{ xs: 12, lg: 4 }}>
-          <SectionSkeleton fields={3} />
-        </Grid>
-        <Grid size={{ xs: 12, lg: 3 }}>
           <SectionSkeleton fields={2} />
-        </Grid>
-        <Grid size={12}>
-          <SectionSkeleton fields={3} columns={3} />
-        </Grid>
-        <Grid size={12}>
-          <SectionSkeleton fields={5} columns={3} />
         </Grid>
       </Grid>
     </Box>
@@ -225,6 +241,11 @@ function SettingField({
 
 export default function Settings() {
   const { enqueueSnackbar } = useSnackbar();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = TAB_VALUES.includes(searchParams.get('tab')) ? searchParams.get('tab') : 'general';
+  const selectTab = (_event, value) => {
+    setSearchParams(value === 'general' ? {} : { tab: value }, { replace: true });
+  };
   const query = useFetch(useCallback(() => settingApi.get(), []), []);
 
   const [values, setValues] = useState(EMPTY);
@@ -299,6 +320,12 @@ export default function Settings() {
         fieldErrors[field] = message;
       });
       setErrors(fieldErrors);
+      // A rejected field may sit on another tab: take the admin to it, unless the
+      // tab they are on already shows one of the errors.
+      const errorTabs = Object.keys(fieldErrors)
+        .map((path) => tabOfSection(path.split('.')[0]))
+        .filter(Boolean);
+      if (errorTabs.length && !errorTabs.includes(tab)) selectTab(null, errorTabs[0]);
       enqueueSnackbar(err.message || 'Could not save the settings', { variant: 'error' });
     } finally {
       setSaving(false);
@@ -342,9 +369,38 @@ export default function Settings() {
         }
       />
 
+      <Card sx={{ mb: 2.5 }}>
+        <Tabs value={tab} onChange={selectTab} variant="scrollable" scrollButtons="auto">
+          {TABS.map((t) => {
+            const edited = t.sections.some((section) => dirtySections.includes(section));
+            return (
+              <Tab
+                key={t.value}
+                value={t.value}
+                sx={{ fontWeight: 700, py: 2 }}
+                label={
+                  <Stack direction="row" alignItems="center" spacing={1}>
+                    <span>{t.label}</span>
+                    {/* Edits survive a tab switch, so the tab says it is holding some. */}
+                    {edited && (
+                      <Box
+                        component="span"
+                        title="Unsaved changes"
+                        sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: 'warning.main' }}
+                      />
+                    )}
+                  </Stack>
+                }
+              />
+            );
+          })}
+        </Tabs>
+      </Card>
+
+      {/* ---------- General & Branding ---------- */}
+      {tab === 'general' && (
       <Grid container spacing={2.5} alignItems="stretch">
-        {/* ---------- General information ---------- */}
-        <Grid size={{ xs: 12, lg: 5 }}>
+        <Grid size={{ xs: 12, lg: 8 }}>
           <SectionCard
             title="General Information"
             section="general"
@@ -397,8 +453,38 @@ export default function Settings() {
           </SectionCard>
         </Grid>
 
-        {/* ---------- SEO ---------- */}
+        {/* ---------- Branding ---------- */}
         <Grid size={{ xs: 12, lg: 4 }}>
+          <SectionCard
+            title="Branding"
+            section="branding"
+            dirty={dirtySections.includes('branding')}
+            onReset={resetSection}
+          >
+            <Stack spacing={3}>
+              <AssetPicker
+                label="Logo"
+                hint="Transparent PNG, around 400×120px"
+                ratio="16/9"
+                value={values.branding.logo}
+                onChange={(image) => set('branding', 'logo', asset(image))}
+              />
+              <AssetPicker
+                label="Favicon"
+                hint="Square PNG, 64×64px or larger"
+                value={values.branding.favicon}
+                onChange={(image) => set('branding', 'favicon', asset(image))}
+              />
+            </Stack>
+          </SectionCard>
+        </Grid>
+      </Grid>
+      )}
+
+      {/* ---------- SEO ---------- */}
+      {tab === 'seo' && (
+      <Grid container spacing={2.5}>
+        <Grid size={12}>
           <SectionCard
             title="SEO Settings"
             section="seo"
@@ -436,34 +522,12 @@ export default function Settings() {
             </Stack>
           </SectionCard>
         </Grid>
+      </Grid>
+      )}
 
-        {/* ---------- Branding ---------- */}
-        <Grid size={{ xs: 12, lg: 3 }}>
-          <SectionCard
-            title="Branding"
-            section="branding"
-            dirty={dirtySections.includes('branding')}
-            onReset={resetSection}
-          >
-            <Stack spacing={3}>
-              <AssetPicker
-                label="Logo"
-                hint="Transparent PNG, around 400×120px"
-                ratio="16/9"
-                value={values.branding.logo}
-                onChange={(image) => set('branding', 'logo', asset(image))}
-              />
-              <AssetPicker
-                label="Favicon"
-                hint="Square PNG, 64×64px or larger"
-                value={values.branding.favicon}
-                onChange={(image) => set('branding', 'favicon', asset(image))}
-              />
-            </Stack>
-          </SectionCard>
-        </Grid>
-
-        {/* ---------- Commerce rules ---------- */}
+      {/* ---------- Commerce rules ---------- */}
+      {tab === 'commerce' && (
+      <Grid container spacing={2.5}>
         <Grid size={12}>
           <SectionCard
             title="Commerce Rules"
@@ -511,8 +575,12 @@ export default function Settings() {
             </Grid>
           </SectionCard>
         </Grid>
+      </Grid>
+      )}
 
-        {/* ---------- Social ---------- */}
+      {/* ---------- Social ---------- */}
+      {tab === 'social' && (
+      <Grid container spacing={2.5}>
         <Grid size={12}>
           <SectionCard
             title="Social Profiles"
@@ -549,10 +617,16 @@ export default function Settings() {
           </SectionCard>
         </Grid>
       </Grid>
+      )}
 
-      {/* ---------- Action bar ---------- */}
+      {/* ---------- Action bar ----------
+          Only there while something is unsaved: with nothing to save or discard it
+          was a permanent strip of disabled buttons. It slides away again after a
+          successful save or a discard. */}
+      <Slide direction="up" in={isDirty} mountOnEnter unmountOnExit>
       <Box
         sx={{
+          zIndex: (theme) => theme.zIndex.appBar - 1,
           position: 'sticky',
           bottom: 0,
           mt: 2.5,
@@ -572,9 +646,7 @@ export default function Settings() {
           justifyContent="space-between"
         >
           <Typography variant="body2" color="text.secondary">
-            {isDirty
-              ? 'You have unsaved changes.'
-              : 'Everything here is live on the storefront.'}
+            You have unsaved changes.
           </Typography>
 
           <Stack direction="row" spacing={1.5} justifyContent="flex-end">
@@ -600,6 +672,7 @@ export default function Settings() {
           </Stack>
         </Stack>
       </Box>
+      </Slide>
     </Box>
   );
 }
